@@ -1,11 +1,11 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart' as sdk;
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
+    as sdk;
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' as widgets;
-import 'package:flutterrific_opentelemetry/src/flutterrific_otel.dart';
+import 'package:middleware_flutter_opentelemetry/src/flutterrific_otel.dart';
 
 import '../flutterrific_otel_metrics.dart';
 import '../trace/ui_span.dart';

@@ -1,17 +1,15 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
-
 import 'package:flutter/material.dart';
-import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart';
+import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 
 void main() {
   /// This is a minimal demo, for a full demo see
   /// wondrous_opentelemetry
-  String appName = 'flutterrific_example_app';
+  String appName = 'middleware_example_app';
   FlutterOTel.initialize(
     //the 'service' for Flutter is the client
     serviceName: appName,
-    // the deafult tracer is the app-ui
+    // the default tracer is the app-ui
     // You can use OTel to create other tracers for different
     // parts of the app, for repositories or services, etc.
     // or use one tracer for the whole app.
@@ -26,12 +24,12 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'FlutterrificOTel Demo',
+      title: 'FlutterOTel Demo',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'FlutterrificOTel Demo Home'),
+      home: const MyHomePage(title: 'FlutterOTel Demo Home'),
       // Add OpenTelemetry with just one line!
     );
   }

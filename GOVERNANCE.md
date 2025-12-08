@@ -80,9 +80,9 @@ The project follows semantic versioning and provides stability guarantees as doc
 
 ## Relation to Other Dart OpenTelemetry Projects
 
-This Flutter SDK builds upon and extends the [OpenTelemetry SDK for Dart](https://pub.dev/packages/dartastic_opentelemetry) and [OpenTelemetry API for Dart](https://pub.dev/packages/dartastic_opentelemetry_api) to provide Flutter-specific functionality. It is designed to be:
+This Flutter SDK builds upon and extends the [OpenTelemetry SDK for Dart](https://pub.dev/packages/middleware_dart_opentelemetry) and [OpenTelemetry API for Dart](https://pub.dev/packages/dartastic_opentelemetry_api) to provide Flutter-specific functionality. It is designed to be:
 
-- Compatible with the Dartastic OpenTelemetry SDK and API
+- Compatible with the Middleware Dart OpenTelemetry SDK and API
 - Interoperable with the OpenTelemetry Collector
 - Optimized for Flutter application patterns and lifecycle
 - Usable across all Flutter platforms (Android, iOS, Web, Desktop)

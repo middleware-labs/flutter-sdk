@@ -55,7 +55,7 @@ Current stability levels:
 
 The Flutter SDK maintains compatibility with the underlying Dart OpenTelemetry libraries:
 
-- Flutter SDK versions will align with compatible Dartastic OpenTelemetry SDK versions
+- Flutter SDK versions will align with compatible Middleware OpenTelemetry SDK versions
 - When the underlying Dart SDK has a breaking change, the Flutter SDK will also increment its major version
 - The Flutter SDK will maintain compatibility with at least the current and previous minor version of the Dart SDK
 - Platform-specific compatibility will be maintained across supported Flutter versions
@@ -101,7 +101,7 @@ This package aims to align with the OpenTelemetry specification:
 
 The Flutter SDK depends on:
 
-- `dartastic_opentelemetry`: Major version alignment required
+- `middleware_dart_opentelemetry`: Major version alignment required
 - `dartastic_opentelemetry_api`: Major version alignment required
 - `flutter`: Minimum version specified, tested with stable and beta
 - Other dependencies: Semantic versioning constraints applied

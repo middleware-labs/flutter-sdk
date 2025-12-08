@@ -1,8 +1,7 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart';
 import 'package:flutter/foundation.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 
 import 'otel_config.dart';
 
@@ -36,7 +35,7 @@ class PlatformDetection {
     final envProtocol = OTelConfig.protocolEnv;
 
     // Determine if we should use HTTP/protobuf
-    bool useHttp = isWeb; // Always use HTTP for web
+    bool useHttp = true; // Always use HTTP for web
 
     // If explicitly configured, use that instead
     if (envProtocol.isNotEmpty) {
@@ -53,7 +52,7 @@ class PlatformDetection {
       } else {
         if (OTelLog.isWarn()) {
           OTelLog.warn(
-            'Unknown OTEL_EXPORTER_OTLP_PROTOCOL: $envProtocol, defaulting to ${useHttp ? "HTTP/protobuf" : "gRPC"}',
+            'Unknown OTEL_EXPORTER_OTLP_PROTOCOL: $envProtocol, defaulting to HTTP/protobuf}',
           );
         }
       }

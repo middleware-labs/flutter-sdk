@@ -127,7 +127,7 @@ class OTelConfig {
               ? 'iOS'
               : Platform.operatingSystem}',
         );
-        print('Protocol: gRPC');
+        print('Protocol: HTTP');
         print('Endpoint: $endpoint');
       }
       print('Secure: $secure');
@@ -152,15 +152,11 @@ class OTelConfig {
 
   /// Get recommended headers for the current platform
   static Map<String, String> get recommendedHeaders {
-    if (kIsWeb) {
-      return {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      };
-    } else {
-      return {'Content-Type': 'application/x-protobuf'};
-    }
+    return {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    };
   }
 }

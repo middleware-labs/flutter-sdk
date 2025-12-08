@@ -1,41 +1,81 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
 import 'dart:async';
+import 'dart:io';
 
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart' as sdk;
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart';
+import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutterrific_opentelemetry/src/common/otel_lifecycle_observer.dart';
-import 'package:flutterrific_opentelemetry/src/factory/otel_flutter_factory.dart';
-import 'package:flutterrific_opentelemetry/src/metrics/otel_metrics_bridge.dart';
-import 'package:flutterrific_opentelemetry/src/metrics/ui_meter.dart';
-import 'package:flutterrific_opentelemetry/src/metrics/ui_meter_provider.dart';
-import 'package:flutterrific_opentelemetry/src/nav/otel_navigator_observer.dart';
-import 'package:flutterrific_opentelemetry/src/trace/interaction_tracker.dart';
-import 'package:flutterrific_opentelemetry/src/trace/ui_tracer.dart';
-import 'package:flutterrific_opentelemetry/src/trace/ui_tracer_provider.dart';
-import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
+import 'package:middleware_flutter_opentelemetry/src/common/otel_lifecycle_observer.dart';
+import 'package:middleware_flutter_opentelemetry/src/factory/otel_flutter_factory.dart';
+import 'package:middleware_flutter_opentelemetry/src/metrics/otel_metrics_bridge.dart';
+import 'package:middleware_flutter_opentelemetry/src/metrics/ui_meter.dart';
+import 'package:middleware_flutter_opentelemetry/src/metrics/ui_meter_provider.dart';
+import 'package:middleware_flutter_opentelemetry/src/nav/otel_navigator_observer.dart';
+import 'package:middleware_flutter_opentelemetry/src/recording/session_recording.dart';
+import 'package:middleware_flutter_opentelemetry/src/trace/interaction_tracker.dart';
+import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer.dart';
+import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer_provider.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
+    as sdk;
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 import 'package:uuid/uuid.dart';
 
 import 'metrics/metrics_service.dart';
 
 typedef CommonAttributesFunction = Attributes Function();
 
-/// Main entry point for Flutterrific OpenTelemetry SDK.
+/// A span processor that injects common attributes into every span.
+class CommonAttributeSpanProcessor implements SimpleSpanProcessor {
+  final SpanProcessor delegate;
+  final CommonAttributesFunction commonAttributesFn;
+
+  CommonAttributeSpanProcessor({
+    required this.delegate,
+    required this.commonAttributesFn,
+  });
+
+  @override
+  Future<void> onStart(Span span, Context? parentContext) async {
+    final attrs = commonAttributesFn.call();
+    span.addAttributes(attrs);
+    delegate.onStart(span, parentContext);
+  }
+
+  @override
+  Future<void> onEnd(Span span) {
+    return delegate.onEnd(span);
+  }
+
+  @override
+  Future<void> shutdown() {
+    return delegate.shutdown();
+  }
+
+  @override
+  Future<void> forceFlush() {
+    return delegate.forceFlush();
+  }
+
+  @override
+  Future<void> onNameUpdate(Span span, String newName) {
+    return delegate.onNameUpdate(span, newName);
+  }
+}
+
+/// Main entry point for Middleware Flutter OpenTelemetry SDK.
 ///
 /// This class provides a simple API for adding OpenTelemetry tracing
 /// to Flutter applications with minimal configuration.
 ///
-/// FlutterOTel relies on OTel from dartastic_opentelemetry. For custom
+/// FlutterOTel relies on OTel from middleware_dart_opentelemetry. For custom
 /// OTel code such as making custom spans, tracers or spanProcessors, use
-/// the [OTel] class from Dartastic.
-/// can use the complete OTel SDK class from Dartastic.
+/// the [OTel] class from Middleware.
+/// can use the complete OTel SDK class from Middleware.
 class FlutterOTel {
-  static const defaultServiceName = "@dart/flutterrific_opentelemetry";
+  static const defaultServiceName = "@dart/middleware-flutter-opentelemetry";
   static const defaultServiceVersion = "0.1.0";
-  static const dartasticEndpoint = "https://otel.dartastic.io";
+  static const middlewareEndpoint = "https://app.middleware.io";
 
   static OTelLifecycleObserver? _lifecycleObserver;
 
@@ -94,7 +134,7 @@ class FlutterOTel {
   /// Sets up the global default TracerProvider and it's tracers.
   /// Adds the lifecycleObserver to observer and trace app lifecycle events.
   /// [appName] defaults to serviceName.
-  /// [endpoint] is a url, defaulting to http://localhost:4317, the default port
+  /// [endpoint] is a url, defaulting to http://app.middleware.io, the default port
   /// for the default gRPC protocol on a localhost.
   /// [serviceName] SHOULD uniquely identify the instrumentation scope, such as
   /// the instrumentation library (e.g. @dart/opentelemetry_api),
@@ -102,7 +142,7 @@ class FlutterOTel {
   /// [serviceVersion] defaults to the matching OTel spec version
   /// plus a release version of this library, currently  1.11.0.0
   /// [tracerName] the name of the default tracer for the global Tracer provider
-  /// it defaults to 'dartastic' but should be set to something app-specific.
+  /// it defaults to 'middleware' but should be set to something app-specific.
   /// [tracerVersion] the version of the default tracer for the global Tracer
   /// provider.  Defaults to null.
   /// [resourceAttributes] Resource attributes added to [TracerProvider]s.
@@ -114,9 +154,7 @@ class FlutterOTel {
   /// [traceAttributesFunction]
   /// [usesGoRouter] whether the instrumented app uses GoRouter,
   /// defaults to true, makes GoRouter spans faster and more reliable.
-  /// [dartasticApiKey] for Dartastic.io users, the dartastic.io ApiKey
-  /// [tenantId] the standard tenantId, for Dartastic.io users this must match
-  /// the tenantId for the dartasticApiKey.
+  /// [middlewareAccountKey] for middleware.io users, the middlewareio AccountKey
   /// [spanProcessor] The SpanProcessor to add to the defaultTracerProvider.
   /// If null, the following batch span processor and OTLP gRPC exporter is
   /// created and added to the default TracerProvider
@@ -140,7 +178,7 @@ class FlutterOTel {
   /// [sampler] is the sampling strategy to use. Defaults to AlwaysOnSampler.
   /// [spanKind] is the default SpanKind to use. The OTel default is
   /// SpanKind.internal.  This defaults the SpanKind to SpanKind.client.
-  /// Note that Dartastic OTel defaults to SpanKind.server
+  /// Note that Middleware OTel defaults to SpanKind.server
   /// [detectPlatformResources] whether or not to detect platform resources,
   /// Defaults to true.  If set to false, as of this release, there's no need
   /// to await this initialize call, though this may change a future release.
@@ -190,6 +228,16 @@ class FlutterOTel {
   // TODO - function to get the app session key
   // TODO - function to get device id
   // TODO - function to use for devs including device_info_plus to call it
+  static MiddlewareScreenshotManager? _screenshotManager;
+  static final GlobalKey _repaintBoundaryKey = GlobalKey();
+
+  static MiddlewareScreenshotManager? get screenshotManager =>
+      _screenshotManager;
+
+  /// Get the repaint boundary key for wrapping your app
+  static GlobalKey get repaintBoundaryKey => _repaintBoundaryKey;
+  static bool isRecording = false;
+
   // and return attributes
   static Future<void> initialize({
     String? appName,
@@ -204,8 +252,7 @@ class FlutterOTel {
     sdk.SpanProcessor? spanProcessor,
     sdk.Sampler? sampler,
     SpanKind spanKind = SpanKind.client,
-    String? dartasticApiKey,
-    String? tenantId,
+    String? middlewareAccountKey,
     Duration? flushTracesInterval = const Duration(seconds: 30),
     bool detectPlatformResources = true,
     // Metrics configuration
@@ -227,11 +274,11 @@ class FlutterOTel {
             'Using endpoint from OTEL_EXPORTER_OTLP_ENDPOINT: $endpoint',
           );
         }
-      } else if (dartasticApiKey != null && dartasticApiKey.isNotEmpty) {
-        // dartastic key uses the dartastic endpoint
-        endpoint = dartasticEndpoint;
+      } else if (middlewareAccountKey != null &&
+          middlewareAccountKey.isNotEmpty) {
+        endpoint = middlewareEndpoint;
         if (OTelLog.isDebug()) {
-          OTelLog.debug('Using default Dartastic endpoint : $endpoint');
+          OTelLog.debug('Using default Middleware endpoint : $endpoint');
         }
       } else {
         endpoint = OTelFactory.defaultEndpoint;
@@ -246,37 +293,69 @@ class FlutterOTel {
     if (OTelLog.isDebug()) OTelLog.debug('Using endpoint: $endpoint');
 
     resourceAttributes ??= sdk.OTel.attributes();
-    appLaunchId = Uuid().v4();
+    appLaunchId = Uuid().v4().replaceAll('-', '');
+    if (middlewareAccountKey != null && middlewareAccountKey.isNotEmpty) {
+      try {
+        final builder = MiddlewareBuilder(
+          target: endpoint,
+          rumAccessToken: middlewareAccountKey,
+          recordingOptions: const RecordingOptions(
+            screenshotInterval: Duration(seconds: 2),
+            qualityValue: 80,
+            minResolution: 320,
+            archiveChunkSize: 10,
+          ),
+        );
+
+        _screenshotManager = MiddlewareScreenshotManager(
+          builder: builder,
+          sessionId: appLaunchId!,
+          repaintBoundaryKey: _repaintBoundaryKey,
+        );
+
+        if (kDebugMode) {
+          debugPrint(
+            'Screenshot manager initialized for session: $appLaunchId',
+          );
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('Failed to initialize screenshot manager: $e');
+        }
+      }
+    }
     resourceAttributes = resourceAttributes.copyWithAttributes(
       <String, Object>{
         AppLifecycleSemantics.appLaunchId.key: appLaunchId!,
+        'session.id': appLaunchId!,
+        'mw.rum': 'true',
+        'os': kIsWeb ? 'web' : Platform.operatingSystem,
+        'recording': _screenshotManager == null ? '0' : '1',
       }.toAttributes(),
     );
 
     // Create platform-specific exporters if not provided
     if (spanProcessor == null) {
       sdk.SpanExporter exporter;
-      if (kIsWeb) {
-        // Web platform must use HTTP
-        if (OTelLog.isDebug()) {
-          OTelLog.debug('Creating HTTP span exporter for web platform');
-        }
-        exporter = OtlpHttpSpanExporter(
-          OtlpHttpExporterConfig(
-            endpoint: endpoint,
-            compression: false, // Web doesn't handle compression well
-          ),
-        );
-      } else {
-        // Native platforms use gRPC
-        if (OTelLog.isDebug()) {
-          OTelLog.debug('Creating gRPC span exporter for native platform');
-        }
-        exporter = OtlpGrpcSpanExporter(
-          OtlpGrpcExporterConfig(endpoint: endpoint, insecure: !secure),
-        );
+      // Web platform must use HTTP
+      if (OTelLog.isDebug()) {
+        OTelLog.debug('Creating HTTP span exporter for web platform');
       }
-      spanProcessor = sdk.BatchSpanProcessor(
+      exporter = OtlpHttpSpanExporter(
+        OtlpHttpExporterConfig(
+          endpoint: endpoint,
+          compression: false,
+          headers: {
+            "Authorization": middlewareAccountKey!,
+            // Web doesn't handle compression well
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Origin": "sdk.middleware.io",
+          },
+        ),
+      );
+
+      final baseProcessor = sdk.BatchSpanProcessor(
         exporter,
         const BatchSpanProcessorConfig(
           maxQueueSize: 2048,
@@ -284,6 +363,13 @@ class FlutterOTel {
           maxExportBatchSize: 512,
         ),
       );
+
+      // Wrap with common attribute injector
+      spanProcessor = CommonAttributeSpanProcessor(
+        delegate: baseProcessor,
+        commonAttributesFn: FlutterOTel.commonAttributesFunction!,
+      );
+
       if (OTelLog.isDebug()) {
         OTelLog.debug('Created ${kIsWeb ? "HTTP" : "gRPC"} span processor');
       }
@@ -291,26 +377,22 @@ class FlutterOTel {
 
     // Create platform-specific metric exporters if not provided
     if (metricExporter == null) {
-      if (kIsWeb) {
-        // Web platform must use HTTP
-        if (OTelLog.isDebug()) {
-          OTelLog.debug('Creating HTTP metric exporter for web platform');
-        }
-        metricExporter = OtlpHttpMetricExporter(
-          OtlpHttpMetricExporterConfig(
-            endpoint: endpoint,
-            compression: false, // Web doesn't handle compression well
-          ),
-        );
-      } else {
-        // Native platforms use gRPC
-        if (OTelLog.isDebug()) {
-          OTelLog.debug('Creating gRPC metric exporter for native platform');
-        }
-        metricExporter = OtlpGrpcMetricExporter(
-          OtlpGrpcMetricExporterConfig(endpoint: endpoint, insecure: !secure),
-        );
+      // Web platform must use HTTP
+      if (OTelLog.isDebug()) {
+        OTelLog.debug('Creating HTTP metric exporter for web platform');
       }
+      metricExporter = OtlpHttpMetricExporter(
+        OtlpHttpMetricExporterConfig(
+          endpoint: endpoint,
+          compression: false, // Web doesn't handle compression well
+          headers: {
+            "Authorization": middlewareAccountKey!,
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Origin": "sdk.middleware.io",
+          },
+        ),
+      );
     }
 
     metricReader ??= PeriodicExportingMetricReader(
@@ -332,8 +414,7 @@ class FlutterOTel {
       metricExporter: metricExporter,
       metricReader: metricReader,
       enableMetrics: enableMetrics,
-      dartasticApiKey: dartasticApiKey,
-      tenantId: tenantId,
+      middlewareAccountKey: middlewareAccountKey,
       detectPlatformResources: detectPlatformResources,
       oTelFactoryCreationFunction: otelFlutterFactoryFactoryFunction,
     );
@@ -360,6 +441,48 @@ class FlutterOTel {
         sdk.OTel.tracerProvider().forceFlush();
       });
     }
+  }
+
+  static Future<void> startSessionRecording() async {
+    if (_screenshotManager == null) {
+      if (kDebugMode) {
+        debugPrint(
+          'Screenshot manager not initialized. Check middlewareAccountKey.',
+        );
+      }
+      return;
+    }
+
+    try {
+      await _screenshotManager!.start(DateTime.now().millisecondsSinceEpoch);
+      if (kDebugMode) {
+        debugPrint('Session recording started');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Failed to start session recording: $e');
+      }
+    }
+  }
+
+  /// Stop session recording
+  static Future<void> stopSessionRecording() async {
+    if (_screenshotManager != null) {
+      await _screenshotManager!.stop();
+      if (kDebugMode) {
+        debugPrint('Session recording stopped');
+      }
+    }
+  }
+
+  /// Mask a sensitive view (e.g., password field)
+  static void maskView(GlobalKey key) {
+    _screenshotManager?.setViewForBlur(key);
+  }
+
+  /// Unmask a previously masked view
+  static void unmaskView(GlobalKey key) {
+    _screenshotManager?.removeSanitizedElement(key);
   }
 
   /// Get the Tracer instance
@@ -507,6 +630,7 @@ class FlutterOTel {
       'ui.navigation.from': fromRoute,
       'ui.navigation.to': toRoute,
       'ui.navigation.type': navigationType,
+      'event.type': 'navigation',
     };
 
     // Record as span
@@ -621,6 +745,7 @@ class FlutterOTel {
     if (_lifecycleObserver != null) {
       _lifecycleObserver!.dispose();
     }
+    stopSessionRecording();
     forceFlush();
   }
 
@@ -663,6 +788,9 @@ extension OTelWidgetExtension on Widget {
             attributes: {
               'error.context': 'widget_build',
               'error.widget': widgetName,
+              'error.stack': errorDetails.stack.toString(),
+              'error.message': errorDetails.exception.toString(),
+              'error.type': errorDetails.exception.runtimeType.toString(),
             },
           );
 

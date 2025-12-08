@@ -1,8 +1,7 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart';
-import 'package:flutterrific_opentelemetry/src/trace/ui_tracer.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
+import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer.dart';
 
 part 'ui_tracer_provider_create.dart';
 

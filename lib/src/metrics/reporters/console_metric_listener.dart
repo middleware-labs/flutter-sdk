@@ -1,5 +1,4 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
 import 'package:flutter/widgets.dart';
 import 'metric_listener_base.dart';

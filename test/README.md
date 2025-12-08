@@ -75,4 +75,4 @@ These tests focus on the following key areas:
 3. Ensuring the two systems work well together
 4. Testing the behavior of the API in realistic Flutter applications
 
-The tests don't verify the content of spans or the export functionality, as those are more appropriately tested in the underlying Dartastic OpenTelemetry implementation.
+The tests don't verify the content of spans or the export functionality, as those are more appropriately tested in the underlying Middleware Dart OpenTelemetry implementation.

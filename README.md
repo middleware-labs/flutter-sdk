@@ -1,18 +1,18 @@
 # Flutterrific OpenTelemetry SDK for Flutter
 
-[![pub.dev](https://img.shields.io/pub/v/flutterrific_opentelemetry.svg)](https://pub.dev/packages/flutterrific_opentelemetry)
+[![pub.dev](https://img.shields.io/pub/v/middleware_flutter_opentelemetry.svg)](https://pub.dev/packages/middleware_flutter_opentelemetry)
 
-[//]: # ([![Flutter CI]&#40;https://github.com/MindfulSoftwareLLC/flutterrific_opentelemetry/actions/workflows/flutter.yml/badge.svg&#41;]&#40;https://github.com/MindfulSoftwareLLC/flutterrific_opentelemetry/actions/workflows/flutter.yml&#41;)
+[//]: # ([![Flutter CI]&#40;https://github.com/middleware-labs/flutter-sdk/actions/workflows/flutter.yml/badge.svg&#41;]&#40;https://github.com/middleware-labs/flutter-sdk/actions/workflows/flutter.yml&#41;)
 
-[//]: # ([![codecov]&#40;https://codecov.io/gh/MindfulSoftwareLLC/flutterrific_opentelemetry/branch/main/graph/badge.svg&#41;]&#40;https://codecov.io/gh/MindfulSoftwareLLC/flutterrific_opentelemetry&#41;)
+[//]: # ([![codecov]&#40;https://codecov.io/gh/middleware-labs/flutter-sdk/branch/main/graph/badge.svg&#41;]&#40;https://codecov.io/gh/middleware-labs/flutter-sdk&#41;)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-Flutterrific OTel is an OpenTelemetry SDK for Flutter applications built on the [Dartastic OpenTelemetry SDK](https://pub.dev/packages/dartastic_opentelemetry), providing comprehensive observability for Flutter applications across all platforms.
+Middleware Flutter OTel is an OpenTelemetry SDK for Flutter applications built on the [Middleware OpenTelemetry SDK](https://pub.dev/packages/middleware_dart_opentelemetry), providing comprehensive observability for Flutter applications across all platforms.
 
 ## Demo
 
-The [Wondrous OpenTelemetry](https://github.com/MindfulSoftwareLLC/flutter-wonderous-app-opentelemetry) project instruments the Wondrous App for observability with Flutterrific OTel. 
-The `main.dart` and `router.dart` show how to set up your app with Flutterrific OpenTelemetry.
+The [Wondrous OpenTelemetry](https://github.com/middleware-labs/flutter-wonderous-app-opentelemetry) project instruments the Wondrous App for observability with Middleware Flutter OTel. 
+The `main.dart` and `router.dart` show how to set up your app with Middleware Flutter OpenTelemetry.
 
 ## Overview
 
@@ -37,6 +37,7 @@ OTel works on client apps. Flutterrific will follow the client spec as it mature
 
 - 🚀 **Simple Integration**: Get started with just a few lines of code
 - 👣 **Automatic Instrumentation**: Navigation, app lifecycle, and user interaction tracking
+- 📹 **Session Replay**: Lightweight Session replay of application.
 - 📊 **Performance Metrics**: Web vitals, APDEX scores, and custom performance metrics
 - 🧩 **Widget Extensions**: Easy-to-use extensions for widget-level observability
 - 🐞 **Error Tracking**: Comprehensive error handling and reporting
@@ -52,14 +53,14 @@ OTel works on client apps. Flutterrific will follow the client spec as it mature
 
 ```yaml
 dependencies:
-  flutterrific_opentelemetry: ^0.3.3
+  middleware_flutter_opentelemetry: ^1.0.0
 ```
 
 ### 2. Initialize OpenTelemetry
 
 ```dart
 import 'package:flutter/material.dart';
-import 'package:flutterrific_opentelemetry/flutterrific_otel.dart';
+import 'package:middleware_flutter_opentelemetry/flutterrific_otel.dart';
 
 void main() {
   // Initialize error handling
@@ -73,9 +74,11 @@ void main() {
       serviceName: 'my-flutter-app',
       serviceVersion: '1.0.0',
       tracerName: 'main',
+      middlewareAccountKey: "*****", // Obtain from RUM Flutter installation page
+      endpoint: 'https://<account>.middleware.io',  
       // Configure your exporter endpoint
       resourceAttributes: {
-        'deployment.environment': 'production',
+        'env': 'production',
         'service.namespace': 'mobile-apps',
       }
     );
@@ -108,7 +111,7 @@ The SDK automatically instruments:
 
 ## Environment Variables
 
-Dartastic OpenTelemetry supports standard OpenTelemetry environment variables as defined in the [OpenTelemetry Specification](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/).
+Middleware OpenTelemetry supports standard OpenTelemetry environment variables as defined in the [OpenTelemetry Specification](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/).
 
 These environment variables can be set to configure the SDK behavior without changing code. Signal-specific variables take precedence over general ones.
 
@@ -177,7 +180,7 @@ flutter run \
   --dart-define=OTEL_SERVICE_VERSION=1.0.0 \
   --dart-define=OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector:4317 \
   --dart-define=OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
-  --dart-define=OTEL_EXPORTER_OTLP_HEADERS=api-key=your-api-key
+  --dart-define=OTEL_EXPORTER_OTLP_HEADERS=Authorization=your-api-key
 ```
 
 ## Advanced Usage
@@ -251,7 +254,7 @@ RiskyWidget().withOTelErrorBoundary('risky_operation');
 ## Examples
 
 - [Basic Integration Example](example/)
-- [Wonderous OpenTelemetry](https://github.com/MindfulSoftwareLLC/wondrous_opentelemetry) - Complete app example based on Wonderous
+- [Flutter_Wonderous OpenTelemetry](https://github.com/middleware-labs/flutter-wonderous-app-opentelemetry) - Complete app example based on Wonderous
 
 ## Contributing
 
@@ -261,8 +264,8 @@ We are looking for contributors and maintainers! Please see our [Contributing Gu
 
 ```bash
 # Clone the repository
-git clone https://github.com/MindfulSoftwareLLC/flutterrific_opentelemetry.git
-cd flutterrific_opentelemetry
+git clone https://github.com/middleware-labs/flutter-sdk.git
+cd flutter-sdk
 
 # Install dependencies
 make install
@@ -299,19 +302,13 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## Community
 
-- [GitHub Issues](https://github.com/MindfulSoftwareLLC/flutterrific_opentelemetry/issues) - Bug reports and feature requests
+- [GitHub Issues](https://github.com/middleware-labs/flutter-sdk/issues) - Bug reports and feature requests
 - [OpenTelemetry Community](https://opentelemetry.io/community/) - Broader OpenTelemetry community
 
 ## Acknowledgments
 
 Built on the foundation of:
-- [Dartastic OpenTelemetry SDK](https://pub.dev/packages/dartastic_opentelemetry)
+- [Middleware OpenTelemetry SDK](https://pub.dev/packages/middleware_dart_opentelemetry)
 - [Dartastic OpenTelemetry API](https://pub.dev/packages/dartastic_opentelemetry_api)
 - [OpenTelemetry Specification](https://opentelemetry.io/docs/specs/otel/)
 - [Flutter Framework](https://flutter.dev/)
-
-Maintained by [Michael Bushe](https://github.com/michaelbushe) and [Mindful Software LLC](https://mindfulsoftware.com).
-
----
-
-*This project aims to be contributed to the [OpenTelemetry](https://opentelemetry.io/) organization under the [Cloud Native Computing Foundation](https://www.cncf.io/).*

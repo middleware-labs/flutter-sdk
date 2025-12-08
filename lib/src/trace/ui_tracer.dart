@@ -1,12 +1,12 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutterrific_opentelemetry/src/trace/ui_span.dart';
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart'
     as api;
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart' as sdk;
+import 'package:flutter/foundation.dart';
+import 'package:middleware_flutter_opentelemetry/src/trace/ui_span.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
+    as sdk;
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 
 import '../flutterrific_otel.dart';
 
@@ -17,6 +17,8 @@ class UITracer implements sdk.Tracer {
   final sdk.TracerProvider _provider;
   final sdk.Tracer _delegate;
   final sdk.Sampler? _sampler;
+
+  var actionCount = 0;
 
   @override
   sdk.Sampler? get sampler => _sampler ?? _provider.sampler;
@@ -208,6 +210,7 @@ class UITracer implements sdk.Tracer {
     var attrMap = <String, Object>{
       api.NavigationSemantics.routeName.key: newRouteName,
       api.NavigationSemantics.routePath.key: newRoutePath,
+      'activity.name': newRouteName,
       api.NavigationSemantics.routeKey.key: newRouteKey,
       api.NavigationSemantics.routeArguments.key: newRouteArguments,
       api.NavigationSemantics.routeId.key: routeSpanId.hexString,
@@ -251,15 +254,18 @@ class UITracer implements sdk.Tracer {
     }
 
     final spanName = 'interaction.$screenName.$interactionType';
+    actionCount++;
     var interactionAttributes =
         <String, Object>{
           api.NavigationSemantics.routeName.key: screenName,
           api.InteractionSemantics.interactionType.key: interactionType.key,
+          'event.type': interactionType.key,
           if (targetName != null)
             api.InteractionSemantics.interactionTarget.key: targetName,
           if (responseTime != null)
             api.InteractionSemantics.inputDelay.key:
                 responseTime.inMilliseconds,
+          'action_count': actionCount,
         }.toAttributes();
     if (attributes != null) {
       interactionAttributes = interactionAttributes.copyWithAttributes(
@@ -296,6 +302,7 @@ class UITracer implements sdk.Tracer {
       kind: api.SpanKind.client,
       attributes:
           <String, Object>{
+            'event.type': 'error',
             'error.context': context,
             api.ErrorSemantics.errorType.key: error.runtimeType.toString(),
             api.ErrorSemantics.errorMessage.key: error.toString(),
@@ -354,6 +361,7 @@ class UITracer implements sdk.Tracer {
       api.AppLifecycleSemantics.appLifecycleState.key: newState ?? 'start',
       api.AppLifecycleSemantics.appLifecycleStateId.key: newStateId,
       api.AppLifecycleSemantics.appLifecycleTimestamp.key: startTime,
+      'event.type': 'appActivity',
     };
     if (previousState != null) {
       attributeMap[api.AppLifecycleSemantics.appLifecyclePreviousState.key] =
@@ -369,7 +377,7 @@ class UITracer implements sdk.Tracer {
     }
 
     return startSpan(
-      api.AppLifecycleSemantics.appLifecycleChange.key,
+      "AppStart",
       uiSpanType: UISpanType.appLifecycle,
       attributes: attributeMap.toAttributes(),
     );

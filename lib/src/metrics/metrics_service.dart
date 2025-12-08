@@ -1,7 +1,6 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
-import '../../flutterrific_opentelemetry.dart';
+import '../../middleware_flutter_opentelemetry.dart';
 import 'trackers/page_tracker.dart';
 import 'trackers/paint_tracker.dart';
 import 'trackers/shift_tracker.dart';

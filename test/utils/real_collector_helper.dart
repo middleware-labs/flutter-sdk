@@ -1,5 +1,4 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
 // ignore_for_file: avoid_print
 
@@ -26,7 +25,7 @@ class RealCollector {
     final execPath = '${Directory.current.path}/test/testing_utils/otelcol';
     if (!File(execPath).existsSync()) {
       throw StateError(
-        'OpenTelemetry Collector not found at $execPath. Copy the testing_utils directory from dartastic_opentelemetry.',
+        'OpenTelemetry Collector not found at $execPath. Copy the testing_utils directory from middleware_dart_opentelemetry.',
       );
     }
 

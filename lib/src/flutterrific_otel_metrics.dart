@@ -1,8 +1,8 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart' as sdk;
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
+    as sdk;
 import 'flutterrific_otel.dart';
 import 'metrics/otel_metrics_bridge.dart';
 

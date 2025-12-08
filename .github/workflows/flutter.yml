@@ -12,10 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - name: Setup Flutter SDK
+        uses: flutter-actions/setup-flutter@v4
         with:
-          flutter-version: 'stable'
-          channel: 'stable'
+          channel: stable
+          version: 3.38.3
+      - run: flutter --version
       - name: Install dependencies
         run: flutter pub get
       - name: Verify formatting
@@ -38,15 +40,16 @@ jobs:
         run: flutter pub get
       - name: Run tests
         run: flutter test
-      
+
   coverage:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - name: Setup Flutter SDK
+        uses: flutter-actions/setup-flutter@v4
         with:
-          flutter-version: 'stable'
-          channel: 'stable'
+          channel: stable
+          version: 3.38.3
       - name: Install dependencies
         run: flutter pub get
       - name: Install lcov
@@ -60,7 +63,7 @@ jobs:
         with:
           file: coverage/lcov.info
           fail_ci_if_error: false
-          
+
   pana:
     runs-on: ubuntu-latest
     steps:
@@ -83,10 +86,11 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - uses: subosito/flutter-action@v2
+      - name: Setup Flutter SDK
+        uses: flutter-actions/setup-flutter@v4
         with:
-          flutter-version: 'stable'
-          channel: 'stable'
+          channel: stable
+          version: 3.38.3
       - name: Install dependencies
         run: flutter pub get
       - name: Build Android example
@@ -98,10 +102,11 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - name: Setup Flutter SDK
+        uses: flutter-actions/setup-flutter@v4
         with:
-          flutter-version: 'stable'
-          channel: 'stable'
+          channel: stable
+          version: 3.38.3
       - name: Install dependencies
         run: flutter pub get
       - name: Build iOS example
@@ -113,10 +118,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - name: Setup Flutter SDK
+        uses: flutter-actions/setup-flutter@v4
         with:
-          flutter-version: 'stable'
-          channel: 'stable'
+          channel: stable
+          version: 3.38.3
       - name: Install dependencies
         run: flutter pub get
       - name: Build Web example

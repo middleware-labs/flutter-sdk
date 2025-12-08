@@ -24,12 +24,12 @@ There are many ways to contribute to this project:
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/flutterrific_opentelemetry.git
-   cd flutterrific_opentelemetry
+   git clone https://github.com/YOUR_USERNAME/flutter-sdk.git
+   cd flutter-sdk
    ```
 3. Add the upstream repository:
    ```bash
-   git remote add upstream https://github.com/MindfulSoftwareLLC/flutterrific_opentelemetry.git
+   git remote add upstream https://github.com/middleware-labs/flutter-sdk.git
    ```
 4. Install dependencies:
    ```bash

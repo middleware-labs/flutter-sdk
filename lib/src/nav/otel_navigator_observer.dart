@@ -1,9 +1,8 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
 import 'package:flutter/widgets.dart';
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
-import '../../flutterrific_opentelemetry.dart';
+import '../../middleware_flutter_opentelemetry.dart';
 import './nav_util.dart';
 import 'otel_route_data.dart';
 

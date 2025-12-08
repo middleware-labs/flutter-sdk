@@ -14,7 +14,7 @@ Below are the versions of the OpenTelemetry SDK for Flutter that are currently s
 We take the security of OpenTelemetry SDK for Flutter seriously. If you believe you have found a security vulnerability, please follow these steps:
 
 1. **Do not disclose the vulnerability publicly**
-2. **Contact the maintainers privately** - Email security@dartastic.io with details of the vulnerability
+2. **Contact the maintainers privately** - Email security@middleware.io with details of the vulnerability
 3. **Provide sufficient information** to reproduce the issue, including:
    - Description of the vulnerability
    - Steps to reproduce
@@ -111,7 +111,7 @@ Security updates will be provided for:
 
 ## Reporting Security Issues in Dependencies
 
-If you discover security issues in our dependencies (such as dartastic_opentelemetry or Flutter itself), please:
+If you discover security issues in our dependencies (such as middleware_dart_opentelemetry or Flutter itself), please:
 1. Report to the appropriate upstream project first
 2. Notify our maintainers if the issue affects this package
 3. We will coordinate with upstream maintainers for resolution

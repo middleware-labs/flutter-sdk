@@ -1,10 +1,10 @@
 // Licensed under the Apache License, Version 2.0
-// Copyright 2025, Michael Bushe, All rights reserved.
 
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart' as sdk;
-import '../../flutterrific_opentelemetry.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
+    as sdk;
+import '../../middleware_flutter_opentelemetry.dart';
 import './nav_util.dart';
 import 'otel_route_data.dart';
 
