@@ -56,7 +56,7 @@ body:
     attributes:
       label: Location
       description: Where is this documentation located? (URL, file path, etc.)
-      placeholder: https://pub.dev/packages/flutterrific_opentelemetry or README.md section...
+      placeholder: https://pub.dev/packages/middleware_flutter_opentelemetry or README.md section...
     validations:
       required: false
 

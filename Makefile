@@ -1,4 +1,4 @@
-# Makefile for Flutterrific OpenTelemetry SDK
+# Makefile for Middleware Flutter OpenTelemetry SDK
 
 .PHONY: help install clean test coverage analyze format build publish docs example
 

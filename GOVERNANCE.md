@@ -50,7 +50,7 @@ All participants in the project are expected to follow the CNCF Code of Conduct 
 This project aims to be a compliant implementation of the OpenTelemetry specification for Flutter. While we maintain our own governance for this specific implementation, we:
 
 - Follow the OpenTelemetry specification
-- Implement the [OpenTelemetry SDK for Flutter](https://pub.dev/packages/flutterrific_opentelemetry)
+- Implement the [OpenTelemetry SDK for Flutter](https://pub.dev/packages/middleware_flutter_opentelemetry)
 - Seek alignment with the broader OpenTelemetry community
 - Prioritize interoperability with other OpenTelemetry implementations
 - Support compatibility with the OpenTelemetry Collector

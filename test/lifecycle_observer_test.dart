@@ -1,10 +1,11 @@
 // Licensed under the Apache License, Version 2.0
 // ignore_for_file: avoid_print
 
+import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
-import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
+
 import 'utils/real_collector_helper.dart';
 
 class MockLifecycleApp extends StatefulWidget {
@@ -68,6 +69,9 @@ void main() {
         endpoint: 'http://localhost:4317',
         serviceName: 'ui-test-service',
         serviceVersion: '1.0.0',
+        commonAttributesFunction: () {
+          return {'test.user_id': 'test-user-123'}.toAttributes();
+        },
       );
 
       lifecycleObserver = OTelLifecycleObserver();
@@ -223,6 +227,9 @@ void main() {
         endpoint: 'http://localhost:4316', // Match collector port
         serviceName: 'lifecycle-observer-test',
         serviceVersion: '1.0.0',
+        commonAttributesFunction: () {
+          return {'test.user_id': 'test-user-123'}.toAttributes();
+        },
       );
     });
 

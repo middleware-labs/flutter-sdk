@@ -1,6 +1,6 @@
-# Flutterrific OpenTelemetry Tests
+# Middleware Flutter OpenTelemetry Tests
 
-This directory contains tests for the Flutterrific OpenTelemetry Flutter library, with a special focus on the app lifecycle and navigation observers.
+This directory contains tests for the Middleware OpenTelemetry Flutter library, with a special focus on the app lifecycle and navigation observers.
 
 ## Tests Structure
 

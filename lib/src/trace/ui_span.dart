@@ -24,7 +24,7 @@ class UISpan implements Span {
        _lifecycleState = lifecycleState;
 
   /// If set, the type of span: Navigation, appLifecycle, etc.
-  /// Spans created automatically by Flutterrific OTel have UISpanTypes
+  /// Spans created automatically by Middleware OTel have UISpanTypes
   /// but manual spans may not have a specific type
   UISpanType? get uiSpanType => _uiSpanType;
 

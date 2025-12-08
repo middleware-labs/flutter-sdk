@@ -6,6 +6,9 @@ import 'dart:io';
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
+    as sdk;
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 import 'package:middleware_flutter_opentelemetry/src/common/otel_lifecycle_observer.dart';
 import 'package:middleware_flutter_opentelemetry/src/factory/otel_flutter_factory.dart';
 import 'package:middleware_flutter_opentelemetry/src/metrics/otel_metrics_bridge.dart';
@@ -16,9 +19,6 @@ import 'package:middleware_flutter_opentelemetry/src/recording/session_recording
 import 'package:middleware_flutter_opentelemetry/src/trace/interaction_tracker.dart';
 import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer.dart';
 import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer_provider.dart';
-import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
-    as sdk;
-import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 import 'package:uuid/uuid.dart';
 
 import 'metrics/metrics_service.dart';
@@ -341,19 +341,25 @@ class FlutterOTel {
       if (OTelLog.isDebug()) {
         OTelLog.debug('Creating HTTP span exporter for web platform');
       }
-      exporter = OtlpHttpSpanExporter(
-        OtlpHttpExporterConfig(
-          endpoint: endpoint,
-          compression: false,
-          headers: {
-            "Authorization": middlewareAccountKey!,
-            // Web doesn't handle compression well
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Origin": "sdk.middleware.io",
-          },
-        ),
-      );
+      if (middlewareAccountKey != null && middlewareAccountKey.isNotEmpty) {
+        exporter = OtlpHttpSpanExporter(
+          OtlpHttpExporterConfig(
+            endpoint: endpoint,
+            compression: false,
+            headers: {
+              "Authorization": middlewareAccountKey,
+              // Web doesn't handle compression well
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Origin": "sdk.middleware.io",
+            },
+          ),
+        );
+      } else {
+        exporter = OtlpHttpSpanExporter(
+          OtlpHttpExporterConfig(endpoint: endpoint, compression: false),
+        );
+      }
 
       final baseProcessor = sdk.BatchSpanProcessor(
         exporter,
@@ -381,18 +387,27 @@ class FlutterOTel {
       if (OTelLog.isDebug()) {
         OTelLog.debug('Creating HTTP metric exporter for web platform');
       }
-      metricExporter = OtlpHttpMetricExporter(
-        OtlpHttpMetricExporterConfig(
-          endpoint: endpoint,
-          compression: false, // Web doesn't handle compression well
-          headers: {
-            "Authorization": middlewareAccountKey!,
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Origin": "sdk.middleware.io",
-          },
-        ),
-      );
+      if (middlewareAccountKey != null && middlewareAccountKey.isNotEmpty) {
+        metricExporter = OtlpHttpMetricExporter(
+          OtlpHttpMetricExporterConfig(
+            endpoint: endpoint,
+            compression: false, // Web doesn't handle compression well
+            headers: {
+              "Authorization": middlewareAccountKey,
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Origin": "sdk.middleware.io",
+            },
+          ),
+        );
+      } else {
+        metricExporter = OtlpHttpMetricExporter(
+          OtlpHttpMetricExporterConfig(
+            endpoint: endpoint,
+            compression: false, // Web doesn't handle compression well
+          ),
+        );
+      }
     }
 
     metricReader ??= PeriodicExportingMetricReader(

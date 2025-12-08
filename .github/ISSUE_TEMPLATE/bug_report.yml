@@ -56,7 +56,7 @@ body:
       value: |
         - Flutter version: 
         - Dart version: 
-        - flutterrific_opentelemetry version: 
+        - middleware_flutter_opentelemetry version: 
         - Platform(s) affected: 
         - Device/OS version: 
       render: markdown

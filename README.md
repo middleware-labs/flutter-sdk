@@ -1,4 +1,4 @@
-# Flutterrific OpenTelemetry SDK for Flutter
+# Middleware Flutter OpenTelemetry SDK for Flutter
 
 [![pub.dev](https://img.shields.io/pub/v/middleware_flutter_opentelemetry.svg)](https://pub.dev/packages/middleware_flutter_opentelemetry)
 
@@ -17,9 +17,6 @@ The `main.dart` and `router.dart` show how to set up your app with Middleware Fl
 ## Overview
 
 This Flutter SDK implements the [OpenTelemetry](https://opentelemetry.io/) specification, enabling developers to collect distributed traces and metrics from Flutter applications (logs coming soon). OpenTelemetry is a vendor-neutral standard for observability and is the second most active [Cloud Native Computing Foundation (CNCF)](https://www.cncf.io/) project, after Kubernetes.
-
-The CNCF OpenTelemetry Client Group is currently working on the specification for how
-OTel works on client apps. Flutterrific will follow the client spec as it matures.
 
 ## Why OpenTelemetry for Flutter?
 

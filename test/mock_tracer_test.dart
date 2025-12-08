@@ -70,6 +70,9 @@ void main() {
         endpoint: 'http://localhost:4317',
         serviceName: 'ui-test-service',
         serviceVersion: '1.0.0',
+        commonAttributesFunction: () {
+          return {'test.user_id': 'test-user-123'}.toAttributes();
+        },
       );
 
       lifecycleObserver = OTelLifecycleObserver();
@@ -226,6 +229,9 @@ void main() {
         endpoint: 'http://localhost:4317',
         serviceName: 'ui-test-service',
         serviceVersion: '1.0.0',
+        commonAttributesFunction: () {
+          return {'test.user_id': 'test-user-123'}.toAttributes();
+        },
       );
 
       // Create router with FlutterOTel.routeObserver
