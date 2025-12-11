@@ -258,6 +258,7 @@ class UITracer implements sdk.Tracer {
     var interactionAttributes =
         <String, Object>{
           api.NavigationSemantics.routeName.key: screenName,
+          'activity.name': screenName,
           api.InteractionSemantics.interactionType.key: interactionType.key,
           'event.type': interactionType.key,
           if (targetName != null)

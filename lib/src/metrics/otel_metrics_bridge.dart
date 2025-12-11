@@ -1,11 +1,14 @@
 // Licensed under the Apache License, Version 2.0
 
-import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 
 import '../flutterrific_otel.dart';
-import 'ui_meter.dart';
 import 'flutter_metric_reporter.dart';
+import 'ui_meter.dart';
+
+const slowFrameThresholdMs = 16;
+const frozenFrameThresholdMs = 700;
 
 /// Bridge class to connect FlutterMetricReporter metrics to OpenTelemetry metrics
 class OTelMetricsBridge {
@@ -30,8 +33,11 @@ class OTelMetricsBridge {
   Histogram<double>? _interactionTimeHistogram;
   Histogram<double>? _paintTimeHistogram;
   Histogram<double>? _layoutShiftHistogram;
+
   // ignore: unused_field
   ObservableGauge<double>? _apdexScoreGauge;
+  var frozenCount = 0;
+  var slowCountCount = 0;
 
   /// Initialize the metrics bridge by subscribing to metrics streams
   void initialize() {
@@ -241,6 +247,32 @@ class OTelMetricsBridge {
       metric.duration.inMilliseconds.toDouble(),
       attributes,
     );
+
+    if (metric.duration.inMilliseconds > frozenFrameThresholdMs) {
+      frozenCount += 1;
+    } else if (metric.duration.inMilliseconds > slowFrameThresholdMs) {
+      slowCountCount += 1;
+    }
+    if (slowCountCount > 0) {
+      attributes.copyWithIntAttribute("count", slowCountCount);
+      attributes.copyWithStringAttribute(
+        "activity.name",
+        FlutterOTel.routeObserver.currentRouteData!.routeName,
+      );
+      FlutterOTel.tracer
+          .createSpan(name: "slowRenders", attributes: attributes)
+          .end();
+    }
+    if (frozenCount > 0) {
+      attributes.copyWithIntAttribute("count", frozenCount);
+      attributes.copyWithStringAttribute(
+        "activity.name",
+        FlutterOTel.routeObserver.currentRouteData!.routeName,
+      );
+      FlutterOTel.tracer
+          .createSpan(name: "frozenRenders", attributes: attributes)
+          .end();
+    }
   }
 
   /// Handle page load metrics

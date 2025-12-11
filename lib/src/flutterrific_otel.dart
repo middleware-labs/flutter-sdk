@@ -9,19 +9,10 @@ import 'package:flutter/material.dart';
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
     as sdk;
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
-import 'package:middleware_flutter_opentelemetry/src/common/otel_lifecycle_observer.dart';
+import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 import 'package:middleware_flutter_opentelemetry/src/factory/otel_flutter_factory.dart';
-import 'package:middleware_flutter_opentelemetry/src/metrics/otel_metrics_bridge.dart';
-import 'package:middleware_flutter_opentelemetry/src/metrics/ui_meter.dart';
-import 'package:middleware_flutter_opentelemetry/src/metrics/ui_meter_provider.dart';
-import 'package:middleware_flutter_opentelemetry/src/nav/otel_navigator_observer.dart';
 import 'package:middleware_flutter_opentelemetry/src/recording/session_recording.dart';
-import 'package:middleware_flutter_opentelemetry/src/trace/interaction_tracker.dart';
-import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer.dart';
-import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer_provider.dart';
 import 'package:uuid/uuid.dart';
-
-import 'metrics/metrics_service.dart';
 
 typedef CommonAttributesFunction = Attributes Function();
 
@@ -444,8 +435,7 @@ class FlutterOTel {
 
     // Initialize OTel metrics bridge
     // This connects Flutter metrics to OpenTelemetry
-    OTelMetricsBridge.instance.initialize();
-
+    FlutterOTelMetrics.metricReporter.initialize();
     if (kDebugMode) {
       MetricsService.debugPrintMetricsStatus();
     }
@@ -718,7 +708,7 @@ class FlutterOTel {
   }
 
   /// Records a performance metric
-  void recordPerformanceMetric(
+  static void recordPerformanceMetric(
     String name,
     Duration duration, {
     Map<String, dynamic>? attributes,
@@ -767,6 +757,7 @@ class FlutterOTel {
   /// Sends all pending OTel data
   static forceFlush() {
     tracerProvider.forceFlush(); //TODO - await
+    meterProvider.forceFlush();
   }
 
   @visibleForTesting
