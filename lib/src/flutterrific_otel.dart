@@ -679,6 +679,7 @@ class FlutterOTel {
         'error.context': message,
         'error.type': error.runtimeType.toString(),
         'error.message': error.toString(),
+        'event.type': 'error',
         ...?attributes,
       };
 
@@ -797,6 +798,7 @@ extension OTelWidgetExtension on Widget {
               'error.stack': errorDetails.stack.toString(),
               'error.message': errorDetails.exception.toString(),
               'error.type': errorDetails.exception.runtimeType.toString(),
+              'event.type': 'error',
             },
           );
 

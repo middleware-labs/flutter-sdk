@@ -95,6 +95,7 @@ class PageTracker {
         totalTransitionTime,
         attributes: {
           'page': metric.pageName,
+          'activity.name': metric.pageName,
           'transition_type': metric.transitionType,
           'load_time': metric.loadTime.inMilliseconds,
           'transition_overhead':

@@ -216,6 +216,7 @@ class UITracer implements sdk.Tracer {
       api.NavigationSemantics.routeId.key: routeSpanId.hexString,
       api.NavigationSemantics.routeTimestamp.key: newRouteStartTime,
       api.NavigationSemantics.navigationAction.key: routeChangeType.toString(),
+      'event.type': 'navigation',
     };
     if (previousRouteName != null) {
       attrMap[api.NavigationSemantics.previousRouteName.key] =
@@ -303,11 +304,11 @@ class UITracer implements sdk.Tracer {
       kind: api.SpanKind.client,
       attributes:
           <String, Object>{
-            'event.type': 'error',
             'error.context': context,
             api.ErrorSemantics.errorType.key: error.runtimeType.toString(),
             api.ErrorSemantics.errorMessage.key: error.toString(),
             ...?attributes,
+            'event.type': 'error',
           }.toAttributes(),
     );
 
@@ -362,7 +363,7 @@ class UITracer implements sdk.Tracer {
       api.AppLifecycleSemantics.appLifecycleState.key: newState ?? 'start',
       api.AppLifecycleSemantics.appLifecycleStateId.key: newStateId,
       api.AppLifecycleSemantics.appLifecycleTimestamp.key: startTime,
-      'event.type': 'appActivity',
+      'event.type': 'app_activity',
     };
     if (previousState != null) {
       attributeMap[api.AppLifecycleSemantics.appLifecyclePreviousState.key] =

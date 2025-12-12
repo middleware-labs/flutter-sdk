@@ -1,6 +1,6 @@
 name: middleware_flutter_opentelemetry
 description: "A Flutter package for OpenTelemetry based on middleware_dart_opentelemetry"
-version: 1.0.2
+version: 1.0.3
 publisher: middleware.io
 homepage: https://midlleware.io
 repository: https://github.com/middleware-labs/flutter-sdk.git
@@ -12,7 +12,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  middleware_dart_opentelemetry: ^1.0.4
+  middleware_dart_opentelemetry: ^1.0.5
   dartastic_opentelemetry_api: ^0.8.8
   http: ^1.6.0
   #TODO - need to manage go_router dependency versions and no-go-router implementation

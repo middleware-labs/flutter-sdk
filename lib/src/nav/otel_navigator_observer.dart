@@ -1,10 +1,14 @@
 // Licensed under the Apache License, Version 2.0
 
-import 'package:flutter/widgets.dart';
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
+import 'package:flutter/widgets.dart';
+
 import '../../middleware_flutter_opentelemetry.dart';
 import './nav_util.dart';
 import 'otel_route_data.dart';
+
+const slowFrameThresholdMs = 16;
+const frozenFrameThresholdMs = 700;
 
 /// Observer for route changes in Flutter navigation
 class OTelNavigatorObserver extends NavigatorObserver {
@@ -26,6 +30,111 @@ class OTelNavigatorObserver extends NavigatorObserver {
       newRouteChangeType,
     );
     currentRouteData = newOTelRouteData;
+    if (currentRouteData?.routeName != null) {
+      final startTime = DateTime.now();
+      String type = "load";
+      switch (newRouteChangeType) {
+        case NavigationAction.push:
+          type = "load";
+        case NavigationAction.pop:
+          type = "transition";
+        case NavigationAction.replace:
+          type = "replace";
+        case NavigationAction.remove:
+        case NavigationAction.returnTo:
+        case NavigationAction.initial:
+        case NavigationAction.deepLink:
+        case NavigationAction.redirect:
+      }
+      FlutterOTelMetrics.recordPerformanceMetric(
+        'page.${type}_start_time',
+        Duration.zero,
+        attributes: {
+          'route': currentRouteData!.routeName,
+          'from_route':
+              previousRoute != null
+                  ? _routeDataForRoute(previousRoute)
+                  : currentRouteData!.routeName,
+          'navigation_type': newRouteChangeType.value,
+        },
+      );
+      // Add a post-frame callback to measure the actual render time
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final loadDuration = DateTime.now().difference(startTime);
+        if (newRouteChangeType == NavigationAction.push) {
+          double shiftScore = 0.0;
+          if (loadDuration.inMilliseconds > 80) {
+            // Significant load time suggests potential layout instability
+            shiftScore = (loadDuration.inMilliseconds - 80) / 1000.0;
+            shiftScore = shiftScore.clamp(0.0, 1.0);
+          }
+          if (shiftScore > 0.00001) {
+            FlutterMetricReporter().reportLayoutShift(
+              currentRouteData!.routeName,
+              shiftScore,
+              cause: 'page_load',
+              attributes: {
+                'route': currentRouteData!.routeName,
+                'load_time_ms': loadDuration.inMilliseconds,
+                'transition_type': newRouteChangeType.value,
+                'activity.name': currentRouteData!.routeName,
+              },
+            );
+          }
+        }
+
+        var frozenCount = 0;
+        var slowCount = 0;
+        var attributes =
+            <String, Object>{
+              'activity.name': currentRouteData!.routeName,
+              'route': currentRouteData!.routeName,
+              'from_route':
+                  previousRoute != null
+                      ? _routeDataForRoute(previousRoute)
+                      : currentRouteData!.routeName,
+            }.toAttributes();
+        if (loadDuration.inMilliseconds > frozenFrameThresholdMs) {
+          frozenCount += 1;
+        } else if (loadDuration.inMilliseconds > slowFrameThresholdMs) {
+          slowCount += 1;
+        }
+        if (slowCount > 0) {
+          attributes = attributes.copyWithIntAttribute("count", slowCount);
+          FlutterOTel.tracer
+              .startSpan(
+                "slowRenders",
+                kind: SpanKind.client,
+                attributes: attributes,
+              )
+              .end();
+        }
+        if (frozenCount > 0) {
+          attributes = attributes.copyWithIntAttribute("count", frozenCount);
+          FlutterOTel.tracer
+              .startSpan(
+                "frozenRenders",
+                kind: SpanKind.client,
+                attributes: attributes,
+              )
+              .end();
+        }
+
+        FlutterMetricReporter().reportPageLoad(
+          currentRouteData!.routeName,
+          loadDuration,
+          attributes: {
+            'route': currentRouteData!.routeName,
+            'activity.name': currentRouteData!.routeName,
+            'from_route':
+                previousRoute != null
+                    ? _routeDataForRoute(previousRoute)
+                    : currentRouteData!.routeName,
+            'transition_type': newRouteChangeType.value,
+          },
+        );
+      });
+    }
   }
 
   @override
