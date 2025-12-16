@@ -62,13 +62,8 @@ class OTelNavigatorObserver extends NavigatorObserver {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final loadDuration = DateTime.now().difference(startTime);
         if (newRouteChangeType == NavigationAction.push) {
-          double shiftScore = 0.0;
-          if (loadDuration.inMilliseconds > 80) {
-            // Significant load time suggests potential layout instability
-            shiftScore = (loadDuration.inMilliseconds - 80) / 1000.0;
-            shiftScore = shiftScore.clamp(0.0, 1.0);
-          }
-          if (shiftScore > 0.00001) {
+          double shiftScore = loadDuration.inMilliseconds / 100.0;
+          if (shiftScore > 0.01) {
             FlutterMetricReporter().reportLayoutShift(
               currentRouteData!.routeName,
               shiftScore,
