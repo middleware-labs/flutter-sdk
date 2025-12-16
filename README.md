@@ -95,6 +95,39 @@ The SDK automatically instruments:
 - **Performance**: Collect frame rates and rendering metrics
 - **Errors**: Capture and report exceptions with context
 
+### 3. Session Replay
+
+Flutter SDK has the capability of session recording, to start session recording call `FlutterOTel.startSessionRecording();`  
+& to stop session recording call `FlutterOTel.stopSessionRecording()`
+
+```dart
+class MyAppState extends State<MyApp> {
+  
+  @override
+  void initState() {
+    Timer(Duration(milliseconds: 500), () {
+      FlutterOTel.startSessionRecording();
+    });
+    super.initState();
+  }
+  
+  @override
+  void dispose(){
+    try {
+      FlutterOTel.stopSessionRecording();
+    } catch (e) {}
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+        key: FlutterOTel.repaintBoundaryKey,
+        child: ...;
+  }
+}
+```
+
 ## Platform Support
 
 | Platform | Support Level | Protocol  | Notes                                    |
@@ -216,8 +249,13 @@ ElevatedButton(
   child: Text('Submit'),
 ).withOTelButtonTracking('submit_form');
 
-// Monitor widget performance
-ComplexWidget().withOTelPerformanceTracking('complex_widget');
+// Track text field
+TextField(
+  decoration: const InputDecoration(
+    labelText: 'Enter something',
+    border: OutlineInputBorder(),
+  ),
+).withOTelTextFieldTracking('demo_text_field')
 
 // Error boundaries
 RiskyWidget().withOTelErrorBoundary('risky_operation');
