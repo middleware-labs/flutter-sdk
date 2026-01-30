@@ -99,6 +99,10 @@ class FlutterOTel {
   /// the app is closed.
   static String? appLaunchId;
 
+
+  /// Depicts session start time in milliseconds since epoch.
+  static int? sessionStartTime;
+
   /// An id for the latest app lifecycle
   static Uint8List? currentAppLifecycleId;
 
@@ -285,6 +289,7 @@ class FlutterOTel {
 
     resourceAttributes ??= sdk.OTel.attributes();
     appLaunchId = Uuid().v4().replaceAll('-', '');
+    sessionStartTime = DateTime.now().millisecondsSinceEpoch;
     if (middlewareAccountKey != null && middlewareAccountKey.isNotEmpty) {
       try {
         final builder = MiddlewareBuilder(
@@ -306,7 +311,7 @@ class FlutterOTel {
 
         if (kDebugMode) {
           debugPrint(
-            'Screenshot manager initialized for session: $appLaunchId',
+            'Screenshot manager initialized for session: $appLaunchId on: $sessionStartTime',
           );
         }
       } catch (e) {
@@ -319,6 +324,7 @@ class FlutterOTel {
       <String, Object>{
         AppLifecycleSemantics.appLaunchId.key: appLaunchId!,
         'session.id': appLaunchId!,
+        'session.start_time': sessionStartTime!,
         'mw.rum': 'true',
         'os': kIsWeb ? 'web' : Platform.operatingSystem,
         'recording': _screenshotManager == null ? '0' : '1',
