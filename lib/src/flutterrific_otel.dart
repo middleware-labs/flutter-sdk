@@ -232,6 +232,7 @@ class FlutterOTel {
   /// Get the repaint boundary key for wrapping your app
   static GlobalKey get repaintBoundaryKey => _repaintBoundaryKey;
   static bool isRecording = false;
+  static final Map<String, Object> _globalAttributes = {};
 
   // and return attributes
   static Future<void> initialize({
@@ -368,6 +369,7 @@ class FlutterOTel {
       );
 
       // Wrap with common attribute injector
+      commonAttributesFunction ??= () => sdk.OTel.attributes();
       spanProcessor = CommonAttributeSpanProcessor(
         delegate: baseProcessor,
         commonAttributesFn: FlutterOTel.commonAttributesFunction!,
@@ -484,6 +486,47 @@ class FlutterOTel {
         debugPrint('Session recording stopped');
       }
     }
+  }
+
+  /// Set one or more global attributes that will be injected into all spans.
+  /// Merges with any existing global attributes.
+  ///
+  /// Example:
+  /// ```dart
+  /// FlutterOTel.setAttributes({
+  ///   'user.id': 'abc123',
+  ///   'user.role': 'admin',
+  ///   'tenant.id': 'acme-corp',
+  /// });
+  /// ```
+  static void setAttributes(Map<String, Object> attributes) {
+    _globalAttributes.addAll(attributes);
+    _syncAttributeFunction();
+  }
+
+  /// Remove a specific global attribute by key.
+  static void removeAttribute(String key) {
+    _globalAttributes.remove(key);
+    _syncAttributeFunction();
+  }
+
+  /// Clear all global attributes.
+  static void clearAttributes() {
+    _globalAttributes.clear();
+    _syncAttributeFunction();
+  }
+
+  /// Read-only view of the current global attributes.
+  static Map<String, Object> get globalAttributes =>
+      Map.unmodifiable(_globalAttributes);
+
+  /// Keeps commonAttributesFunction in sync whenever _globalAttributes changes.
+  static void _syncAttributeFunction() {
+    final previousFn = commonAttributesFunction;
+    commonAttributesFunction = () {
+      final base = previousFn != null ? previousFn() : sdk.OTel.attributes();
+      return base.copyWithAttributes(_globalAttributes.toAttributes());
+    };
   }
 
   /// Mask a sensitive view (e.g., password field)
