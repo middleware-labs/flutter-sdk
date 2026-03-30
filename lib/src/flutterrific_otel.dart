@@ -30,6 +30,9 @@ class CommonAttributeSpanProcessor implements SimpleSpanProcessor {
   Future<void> onStart(Span span, Context? parentContext) async {
     final attrs = commonAttributesFn.call();
     span.addAttributes(attrs);
+    if (FlutterOTel.globalAttributes.isNotEmpty) {
+      span.addAttributes(FlutterOTel.globalAttributes.toAttributes());
+    }
     delegate.onStart(span, parentContext);
   }
 
@@ -501,33 +504,21 @@ class FlutterOTel {
   /// ```
   static void setAttributes(Map<String, Object> attributes) {
     _globalAttributes.addAll(attributes);
-    _syncAttributeFunction();
   }
 
   /// Remove a specific global attribute by key.
   static void removeAttribute(String key) {
     _globalAttributes.remove(key);
-    _syncAttributeFunction();
   }
 
   /// Clear all global attributes.
   static void clearAttributes() {
     _globalAttributes.clear();
-    _syncAttributeFunction();
   }
 
   /// Read-only view of the current global attributes.
   static Map<String, Object> get globalAttributes =>
       Map.unmodifiable(_globalAttributes);
-
-  /// Keeps commonAttributesFunction in sync whenever _globalAttributes changes.
-  static void _syncAttributeFunction() {
-    final previousFn = commonAttributesFunction;
-    commonAttributesFunction = () {
-      final base = previousFn != null ? previousFn() : sdk.OTel.attributes();
-      return base.copyWithAttributes(_globalAttributes.toAttributes());
-    };
-  }
 
   /// Mask a sensitive view (e.g., password field)
   static void maskView(GlobalKey key) {

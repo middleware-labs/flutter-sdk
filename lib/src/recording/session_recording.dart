@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:archive/archive.dart';
@@ -7,7 +9,37 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:http/http.dart' as http;
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
+
+/// Encodes form field / filename tokens like package:http multipart.
+String _multipartFormDataNameEncode(String value) {
+  return value
+      .replaceAll(RegExp(r'\r\n|\r|\n'), '%0D%0A')
+      .replaceAll('"', '%22');
+}
+
+/// OTLP resource attributes for RUM multipart field `resourceAttributes`.
+///
+/// Must be valid JSON. [Attributes.toJson] is a [Map]; never use
+/// [Map.toString] here — it omits quotes and breaks server-side parsing.
+String _rumResourceAttributesJson() {
+  final provider = OTel.tracerProvider();
+  provider.ensureResourceIsSet();
+  final resource = provider.resource;
+  if (resource == null) {
+    return '{}';
+  }
+  try {
+    return jsonEncode(resource.attributes.toJson());
+  } catch (e, st) {
+    if (kDebugMode) {
+      debugPrint('RUM resourceAttributes jsonEncode failed: $e\n$st');
+    }
+    return '{}';
+  }
+}
 
 /// Callback for screenshot capture
 typedef ScreenshotCallback = void Function(Uint8List imageData);
@@ -66,6 +98,7 @@ class NetworkManager {
   /// Send compressed screenshot archive to server
   Future<void> sendImages(
     String sessionId,
+    String resourceAttributes,
     Uint8List imageData,
     String fileName,
     NetworkCallback callback,
@@ -78,28 +111,48 @@ class NetworkManager {
     try {
       final url = Uri.parse('$baseUrl$_imagesUrl');
 
-      // The imageData is already gzip compressed from archiveFolder
-      // Create multipart request with the gzipped tar archive
+      // imageData is gzip-compressed (tar.gz). Build multipart explicitly so
+      // Content-Type includes boundary=... before send (matches iOS client).
+      final boundary = 'Boundary-${const Uuid().v4()}';
+      final body = BytesBuilder(copy: false);
+      void writeUtf8(String s) => body.add(utf8.encode(s));
+
+      for (final entry in <String, String>{
+        'sessionId': sessionId,
+        'resourceAttributes': resourceAttributes,
+      }.entries) {
+        writeUtf8('--$boundary\r\n');
+        writeUtf8(
+          'Content-Disposition: form-data; name="${_multipartFormDataNameEncode(entry.key)}"\r\n\r\n',
+        );
+        body.add(utf8.encode(entry.value));
+        writeUtf8('\r\n');
+      }
+
+      writeUtf8('--$boundary\r\n');
+      writeUtf8(
+        'Content-Disposition: form-data; name="batch"; '
+        'filename="${_multipartFormDataNameEncode(fileName)}"\r\n',
+      );
+      writeUtf8('Content-Type: gzip\r\n\r\n');
+      body.add(imageData);
+      writeUtf8('\r\n');
+      writeUtf8('--$boundary--\r\n');
+
       final request =
-          http.MultipartRequest('POST', url)
+          http.Request('POST', url)
             ..headers['Authorization'] = token
-            ..fields['sessionId'] = sessionId
-            ..files.add(
-              http.MultipartFile.fromBytes(
-                'batch',
-                imageData,
-                filename: fileName,
-                contentType: http.MediaType('application', 'gzip'),
-              ),
-            );
+            ..headers['Content-Type'] = 'multipart/form-data; boundary=$boundary'
+            ..bodyBytes = body.toBytes();
 
       if (kDebugMode) {
         debugPrint(
-          'Uploading session replay: $fileName (${imageData.length} bytes)',
+          'Uploading session replay: $fileName (${imageData.length} bytes), '
+          'boundary=$boundary',
         );
       }
 
-      final streamedResponse = await request.send();
+      final streamedResponse = await _client.send(request);
       final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -312,6 +365,7 @@ class MiddlewareScreenshotManager {
 
           await networkManager.sendImages(
             staleSessionId,
+            _rumResourceAttributesJson(),
             imageData,
             fileName,
             _NetworkCallbackImpl(
@@ -469,15 +523,37 @@ class MiddlewareScreenshotManager {
     }
   }
 
+  RenderRepaintBoundary? _repaintBoundaryFromKey() {
+    final ctx = repaintBoundaryKey.currentContext;
+    final ro = ctx?.findRenderObject();
+    return ro is RenderRepaintBoundary ? ro : null;
+  }
+
   /// Capture screenshot from RepaintBoundary
   Future<Uint8List?> _captureScreenshot() async {
     try {
-      final boundary =
-          repaintBoundaryKey.currentContext?.findRenderObject()
-              as RenderRepaintBoundary?;
+      var boundary = _repaintBoundaryFromKey();
+      if (boundary == null) {
+        await WidgetsBinding.instance.endOfFrame;
+        boundary = _repaintBoundaryFromKey();
+      }
 
       if (boundary == null) {
-        debugPrint('RepaintBoundary not found');
+        if (kDebugMode) {
+          final ro = repaintBoundaryKey.currentContext?.findRenderObject();
+          if (ro != null) {
+            debugPrint(
+              'Session replay: GlobalKey must be on a RepaintBoundary '
+              '(got ${ro.runtimeType}).',
+            );
+          } else {
+            debugPrint(
+              'Session replay: RepaintBoundary not in tree yet — wrap your '
+              'app (e.g. MaterialApp) with RepaintBoundary(key: '
+              'FlutterOTel.repaintBoundaryKey, child: ...).',
+            );
+          }
+        }
         return null;
       }
 
@@ -694,9 +770,9 @@ class MiddlewareScreenshotManager {
 
           // Use a Completer to wait for the callback
           final completer = Completer<bool>();
-
           await networkManager.sendImages(
             sessionId,
+            _rumResourceAttributesJson(),
             imageData,
             fileName,
             _NetworkCallbackImpl(
