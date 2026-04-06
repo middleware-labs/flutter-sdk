@@ -14,10 +14,22 @@ class OTelNavigatorObserver extends NavigatorObserver {
 
   OTelNavigatorObserver();
 
+  /// Handles a route change event.
+  ///
+  /// [newRoute] is the route involved in the event (pushed, popped, etc.).
+  /// [previousRoute] is the other route in the event.
+  /// [newRouteChangeType] is the type of navigation action.
+  /// [updateCurrentTo] controls what currentRouteData is set to after the
+  /// event. Pass the route that should be considered "current" after this
+  /// event. Pass `null` to leave currentRouteData unchanged (used for
+  /// didRemove, where the current route was already set by a prior push).
+  /// If not specified, defaults to [newRoute].
   void _routeChanged({
     required Route? newRoute,
     required Route? previousRoute,
     required NavigationAction newRouteChangeType,
+    Route? updateCurrentTo,
+    bool useDefault = true,
   }) {
     OTelRouteData newOTelRouteData =
         newRoute == null ? OTelRouteData.empty() : _routeDataForRoute(newRoute);
@@ -26,7 +38,29 @@ class OTelNavigatorObserver extends NavigatorObserver {
       currentRouteData,
       newRouteChangeType,
     );
-    currentRouteData = newOTelRouteData;
+
+    // Emit structured log event for navigation change
+    if (FlutterOTel.enableAutoLogEvents) {
+      try {
+        FlutterOTel.logger('flutter.navigation').emitNavigationEvent(
+          newOTelRouteData.routeName,
+          fromRoute: currentRouteData?.routeName,
+          action: newRouteChangeType.value,
+        );
+      } catch (e) {
+        if (OTelLog.isDebug()) {
+          OTelLog.debug('Failed to emit navigation log event: $e');
+        }
+      }
+    }
+
+    // Update currentRouteData based on what route is now visible
+    if (updateCurrentTo != null) {
+      currentRouteData = _routeDataForRoute(updateCurrentTo);
+    } else if (useDefault) {
+      currentRouteData = newOTelRouteData;
+    }
+    // If updateCurrentTo is null and useDefault is false, keep as-is
   }
 
   @override
@@ -49,19 +83,29 @@ class OTelNavigatorObserver extends NavigatorObserver {
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    // On pop, 'route' is the route being popped off, and 'previousRoute'
+    // is the route that will now be on top. We record the pop event but
+    // set currentRouteData to the route that remains visible.
     _routeChanged(
       newRoute: route,
       previousRoute: previousRoute,
       newRouteChangeType: NavigationAction.pop,
+      updateCurrentTo: previousRoute,
     );
   }
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    // On remove, 'route' is the route being removed. We record the event
+    // but do NOT update currentRouteData to the removed route — it should
+    // stay pointing at whichever route is actually on top (set by a prior
+    // didPush or didReplace).
     _routeChanged(
       newRoute: route,
       previousRoute: previousRoute,
       newRouteChangeType: NavigationAction.remove,
+      updateCurrentTo: null,
+      useDefault: false, // Keep currentRouteData as-is
     );
   }
 
@@ -88,14 +132,14 @@ class OTelNavigatorObserver extends NavigatorObserver {
       }
     }
 
-    var page = (route.settings as Page);
+    final page = route.settings is Page ? route.settings as Page : null;
     LocalKey routeKey =
-        route.settings is Page
+        page != null
             ? page.key ?? ValueKey(route.settings.name ?? 'unknown')
             : ValueKey(route.settings.name ?? 'unknown');
     String routePath = routeName; //fallback
     if (route.settings.arguments != null) {
-      if (route.settings is Page && page.key is ValueKey) {
+      if (page != null && page.key is ValueKey) {
         routePath = (page.key as ValueKey).value;
       } else {
         try {

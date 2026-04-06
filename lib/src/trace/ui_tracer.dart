@@ -9,6 +9,7 @@ import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart'
 import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart' as sdk;
 
 import '../flutterrific_otel.dart';
+import '../semantics/flutter_semantics.dart';
 
 part 'ui_tracer_create.dart';
 
@@ -233,6 +234,7 @@ class UITracer implements sdk.Tracer {
     final span = startSpan(
       api.NavigationSemantics.navigationAction.key,
       uiSpanType: UISpanType.navigation,
+      context: api.Context.root, // Start a new trace for each navigation event
       attributes: attrMap.toAttributes(),
     );
     return span;
@@ -268,6 +270,7 @@ class UITracer implements sdk.Tracer {
     }
     final span = _delegate.startSpan(
       spanName,
+      context: api.Context.root, // Start a new trace for each interaction
       kind: api.SpanKind.client,
       attributes: interactionAttributes,
     );
@@ -293,10 +296,11 @@ class UITracer implements sdk.Tracer {
 
     final span = _delegate.startSpan(
       'error.$context',
+      context: api.Context.root, // Start a new trace for each error
       kind: api.SpanKind.client,
       attributes:
           <String, Object>{
-            'error.context': context,
+            FlutterErrorSemantics.errorContext.key: context,
             api.ErrorSemantics.errorType.key: error.runtimeType.toString(),
             api.ErrorSemantics.errorMessage.key: error.toString(),
             ...?attributes,
@@ -321,10 +325,11 @@ class UITracer implements sdk.Tracer {
 
     final span = _delegate.startSpan(
       'perf.$name',
+      context: api.Context.root, // Start a new trace for each metric
       kind: api.SpanKind.client,
       attributes:
           <String, Object>{
-            'perf.metric.name': name,
+            FlutterPerformanceSemantics.metricName.key: name,
             api.PerformanceSemantics.renderDuration.key:
                 duration.inMilliseconds,
             ...?attributes,
@@ -371,6 +376,7 @@ class UITracer implements sdk.Tracer {
     return startSpan(
       api.AppLifecycleSemantics.appLifecycleChange.key,
       uiSpanType: UISpanType.appLifecycle,
+      context: api.Context.root, // Start a new trace for each lifecycle event
       attributes: attributeMap.toAttributes(),
     );
   }

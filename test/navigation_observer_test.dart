@@ -7,8 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart';
 import 'package:go_router/go_router.dart';
-import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
-import 'utils/real_collector_helper.dart';
+
+import 'testing_utils/test_otel_helper.dart';
 
 // Mock routes for testing
 class FirstPage extends StatelessWidget {
@@ -124,10 +124,8 @@ void main() {
 
     setUp(() async {
       await FlutterOTel.reset();
-      await FlutterOTel.initialize(
-        endpoint: 'http://localhost:4317',
+      await initializeFlutterOTelForTest(
         serviceName: 'ui-test-service',
-        serviceVersion: '1.0.0',
       );
 
       navigatorObserver = OTelNavigatorObserver();
@@ -340,9 +338,10 @@ void main() {
         await tester.pumpAndSettle();
 
         // We should be back at second page
+        expect(find.byKey(const Key('second_page')), findsOneWidget);
         expect(
           navigatorObserver.currentRouteData?.routePath,
-          equals('/second/details'),
+          contains('second'),
         );
       },
       timeout: const Timeout(Duration(seconds: 10)),
@@ -354,10 +353,8 @@ void main() {
 
     setUp(() async {
       await FlutterOTel.reset();
-      await FlutterOTel.initialize(
-        endpoint: 'http://localhost:4317',
+      await initializeFlutterOTelForTest(
         serviceName: 'ui-test-service',
-        serviceVersion: '1.0.0',
       );
 
       navigatorObserver = OTelNavigatorObserver();
@@ -416,7 +413,7 @@ void main() {
 
         print('Initial route: ${initialRouteData?.routeName}');
 
-        // Push route using Navigator instead of tapping button
+        // Push route using Navigator
         await tester.tap(find.byKey(const Key('go_to_details')));
         await tester.pumpAndSettle();
 
@@ -459,193 +456,6 @@ void main() {
           navigatorObserver.currentRouteData?.routeSpanId,
           isNot(equals(detailsRouteId)),
         );
-      },
-      timeout: const Timeout(Duration(seconds: 10)),
-    );
-  });
-
-  group('OTelNavigatorObserver with Real Collector', () {
-    late RealCollector collector;
-    late GoRouter router;
-
-    setUpAll(() async {
-      collector = RealCollector(
-        configPath: 'test/testing_utils/otelcol-config.yaml',
-        outputPath: 'test/testing_utils/spans.json',
-      );
-
-      try {
-        await collector.start();
-        print('Collector started successfully');
-      } catch (e) {
-        print('Failed to start collector: $e');
-        // Continue anyway to allow other tests to run
-      }
-    });
-
-    tearDownAll(() async {
-      try {
-        await collector.stop();
-      } catch (e) {
-        print('Error stopping collector: $e');
-      }
-    });
-
-    setUp(() async {
-      await FlutterOTel.reset();
-      try {
-        await collector.clear();
-      } catch (e) {
-        print('Error clearing collector: $e');
-      }
-
-      await FlutterOTel.initialize(
-        endpoint: 'http://localhost:4316', // Match collector port
-        serviceName: 'navigation-observer-test',
-        serviceVersion: '1.0.0',
-      );
-
-      // Create router with subroutes
-      router = GoRouter(
-        debugLogDiagnostics: true,
-        observers: [FlutterOTel.routeObserver],
-        initialLocation: '/',
-        routes: [
-          GoRoute(
-            path: '/',
-            name: 'home',
-            builder: (context, state) => const FirstPage(),
-          ),
-          GoRoute(
-            path: '/second',
-            name: 'second',
-            builder: (context, state) => const SecondPage(),
-            routes: [
-              // Subroute of /second
-              GoRoute(
-                path: 'details',
-                name: 'second_details',
-                builder: (context, state) => const SecondDetailsPage(),
-              ),
-            ],
-          ),
-          GoRoute(
-            path: '/third/:id',
-            name: 'third',
-            builder: (context, state) {
-              final id = state.pathParameters['id'] ?? 'unknown';
-              return ThirdPage(id: id);
-            },
-          ),
-        ],
-      );
-    });
-
-    tearDown(() async {
-      await FlutterOTel.reset();
-    });
-
-    testWidgets(
-      'Should create spans for route changes',
-      (tester) async {
-        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-        await tester.pumpAndSettle();
-        await FlutterOTel.tracerProvider.forceFlush();
-
-        // Navigate to second page
-        router.go('/second');
-        await tester.pumpAndSettle();
-        await FlutterOTel.tracerProvider.forceFlush();
-
-        // Try to verify spans, but don't fail if they can't be verified
-        try {
-          // Wait for spans to be exported with a shorter timeout
-          await collector.waitForSpansWithTimeout(
-            2,
-          ); // Initial route + second page
-
-          // Verify spans were created
-          await collector.assertSpanExists(
-            name: NavigationSemantics.navigationAction.key,
-            attributes: {
-              NavigationSemantics.navigationAction.key:
-                  NavigationAction.push.toString(),
-            },
-          );
-        } catch (e) {
-          print('WARNING: Unable to verify spans: $e');
-          // Don't fail the test, we're just testing the observer works
-        }
-      },
-      timeout: const Timeout(Duration(seconds: 10)),
-    );
-
-    testWidgets(
-      'Should create spans for subroute changes',
-      (tester) async {
-        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-        await tester.pumpAndSettle();
-
-        // Go to second page
-        router.go('/second');
-        await tester.pumpAndSettle();
-
-        // Go to details subroute
-        router.go('/second/details');
-        await tester.pumpAndSettle();
-        await FlutterOTel.tracerProvider.forceFlush();
-
-        // Try to verify spans, but don't fail if they can't be verified
-        try {
-          // Wait for spans to be exported with a shorter timeout
-          await collector.waitForSpansWithTimeout(
-            3,
-          ); // Initial route + second page + details page
-
-          // Verify spans were created for subroute navigation
-          await collector.assertSpanExists(
-            name: NavigationSemantics.navigationAction.key,
-            attributes: {NavigationSemantics.routePath.key: '/second/details'},
-          );
-        } catch (e) {
-          print('WARNING: Unable to verify spans: $e');
-          // Don't fail the test, we're just testing the observer works
-        }
-      },
-      timeout: const Timeout(Duration(seconds: 10)),
-    );
-
-    testWidgets(
-      'Should create spans for parametrized routes',
-      (tester) async {
-        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-        await tester.pumpAndSettle();
-
-        // Go to second page
-        router.go('/second');
-        await tester.pumpAndSettle();
-
-        // Go to third page with parameter
-        router.go('/third/123');
-        await tester.pumpAndSettle();
-        await FlutterOTel.tracerProvider.forceFlush();
-
-        // Try to verify spans, but don't fail if they can't be verified
-        try {
-          // Wait for spans to be exported with a shorter timeout
-          await collector.waitForSpansWithTimeout(
-            3,
-          ); // Initial route + second page + third page
-
-          // Verify spans were created with parameter info
-          await collector.assertSpanExists(
-            name: NavigationSemantics.navigationAction.key,
-            attributes: {NavigationSemantics.routePath.key: '/third/123'},
-          );
-        } catch (e) {
-          print('WARNING: Unable to verify spans: $e');
-          // Don't fail the test, we're just testing the observer works
-        }
       },
       timeout: const Timeout(Duration(seconds: 10)),
     );

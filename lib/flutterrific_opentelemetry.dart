@@ -19,6 +19,9 @@ export 'src/common/otel_lifecycle_observer.dart';
 export 'src/trace/interaction_tracker.dart';
 export 'src/trace/ui_tracer.dart';
 export 'src/trace/ui_tracer_provider.dart';
+export 'src/logs/ui_logger.dart';
+export 'src/logs/ui_logger_provider.dart';
+export 'src/semantics/flutter_semantics.dart';
 
 /// Re-export key Dartastic OpenTelemetry SDK components for convenience
 export 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart'
@@ -62,10 +65,29 @@ export 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart'
         SpanExporter,
         SpanProcessor,
         SamplingCondition,
+        SimpleSpanProcessor,
         Span,
         TracerProvider,
         Tracer,
-        TraceIdRatioSampler;
+        TraceIdRatioSampler,
+        // Logs
+        Logger,
+        LoggerProvider,
+        LogRecordProcessor,
+        LogRecordExporter,
+        BatchLogRecordProcessor,
+        SimpleLogRecordProcessor,
+        ConsoleLogRecordExporter,
+        OtlpGrpcLogRecordExporter,
+        OtlpGrpcLogRecordExporterConfig,
+        OtlpHttpLogRecordExporter,
+        OtlpHttpLogRecordExporterConfig,
+        SDKLogRecord,
+        ReadableLogRecord,
+        ReadWriteLogRecord,
+        DartLogBridge,
+        LogsConfiguration,
+        NavigationAction;
 
 /// Re-export key OpenTelemetry API components for convenience
 export 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart'
@@ -87,7 +109,6 @@ export 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart'
         DeviceResource,
         DeviceSemantics,
         IdGenerator,
-        InteractionType,
         EnvironmentResource,
         ErrorResource,
         ErrorSemantics,
@@ -123,5 +144,17 @@ export 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart'
         TraceId,
         TraceFlags,
         TraceState,
+        Severity,
+        LogRecord,
         UserSemantics,
-        VersionResource;
+        VersionResource,
+        // UI Semantics
+        AppLifecycleSemantics,
+        AppLifecycleStates,
+        AppStartType,
+        InteractionSemantics,
+        InteractionType,
+        NavigationSemantics,
+        NetworkSemantics,
+        PerformanceSemantics,
+        SessionViewSemantics;

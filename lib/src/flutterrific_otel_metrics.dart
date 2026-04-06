@@ -5,6 +5,7 @@ import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart' as sdk;
 import 'flutterrific_otel.dart';
 import 'metrics/otel_metrics_bridge.dart';
+import 'semantics/flutter_semantics.dart';
 
 /// Extension methods for FlutterOTel related to metrics functionality.
 /// Note: These are not actual extensions but helper methods that should be added
@@ -67,7 +68,7 @@ class FlutterOTelMetrics {
       value: duration.inMilliseconds,
       unit: 'ms',
       metricType: 'histogram',
-      attributes: {'perf.metric.name': name, ...?attributes},
+      attributes: {FlutterPerformanceSemantics.metricName.key: name, ...?attributes},
     );
   }
 
@@ -84,8 +85,8 @@ class FlutterOTelMetrics {
       unit: 'ms',
       metricType: 'histogram',
       attributes: {
-        'navigation.from_route': fromRoute,
-        'navigation.to_route': toRoute,
+        FlutterRouteMetricSemantics.navigationFromRoute.key: fromRoute,
+        FlutterRouteMetricSemantics.navigationToRoute.key: toRoute,
         ...?attributes,
       },
     );
@@ -106,7 +107,7 @@ class FlutterOTelMetrics {
       unit: 'ms',
       metricType: 'histogram',
       attributes: {
-        'interaction.type': type,
+        InteractionSemantics.interactionType.key: type,
         if (screen != null) 'screen': screen,
         ...?attributes,
       },
@@ -126,9 +127,9 @@ class FlutterOTelMetrics {
       unit: '{errors}',
       metricType: 'counter',
       attributes: {
-        'error.type': errorType,
-        if (message != null) 'error.message': message,
-        if (location != null) 'error.location': location,
+        ErrorSemantics.errorType.key: errorType,
+        if (message != null) ErrorSemantics.errorMessage.key: message,
+        if (location != null) FlutterErrorSemantics.errorLocation.key: location,
         ...?attributes,
       },
     );

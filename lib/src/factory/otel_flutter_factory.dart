@@ -3,6 +3,7 @@
 
 import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart';
 
+import '../logs/ui_logger_provider.dart';
 import '../metrics/ui_meter_provider.dart';
 import '../trace/ui_tracer_provider.dart';
 
@@ -62,6 +63,25 @@ class OTelFlutterFactory extends OTelSDKFactory {
             resource: resource,
           )
           as MeterProvider,
+    );
+  }
+
+  @override
+  UILoggerProvider loggerProvider({
+    required String endpoint,
+    String serviceName = "@dart/opentelemetry_api",
+    String? serviceVersion,
+    Resource? resource,
+  }) {
+    return UILoggerProviderCreate.create(
+      delegate:
+          super.loggerProvider(
+                endpoint: endpoint,
+                serviceVersion: serviceVersion,
+                serviceName: serviceName,
+                resource: resource,
+              )
+              as LoggerProvider,
     );
   }
 }

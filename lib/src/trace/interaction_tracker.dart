@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import '../flutterrific_otel.dart';
+import '../semantics/flutter_semantics.dart';
 import 'ui_tracer.dart';
 
 /// Tracks user interactions with UI elements and creates spans automatically.
@@ -109,7 +110,7 @@ class OTelInteractionTracker {
       routeName,
       InteractionType.scroll,
       targetName: scrollableId,
-      attributes: {'scroll.position': position}.toAttributes(),
+      attributes: {FlutterScrollSemantics.scrollPosition.key: position}.toAttributes(),
     );
   }
 

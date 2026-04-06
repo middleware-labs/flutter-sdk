@@ -45,6 +45,22 @@ class OTelLifecycleObserver with widgets.WidgetsBindingObserver {
       previousStateDuration: duration,
     );
     span.end();
+
+    // Emit structured log event for lifecycle change
+    if (FlutterOTel.enableAutoLogEvents) {
+      try {
+        FlutterOTel.logger('flutter.lifecycle').emitLifecycleEvent(
+          newSemanticState.name,
+          previousState: currentAppLifecycleState?.name,
+          duration: duration,
+        );
+      } catch (e) {
+        if (OTelLog.isDebug()) {
+          OTelLog.debug('Failed to emit lifecycle log event: $e');
+        }
+      }
+    }
+
     FlutterOTel.forceFlush();
     FlutterOTel.currentAppLifecycleId = newStateId;
     currentAppLifecycleStartTime = startTime;
