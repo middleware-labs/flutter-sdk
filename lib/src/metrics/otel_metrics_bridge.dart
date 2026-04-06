@@ -113,7 +113,9 @@ class OTelMetricsBridge {
 
     // Add a lifecycle state attribute
     final attributes =
-        <String, Object>{FlutterLifecycleMetricSemantics.lifecycleState.key: state}.toAttributes();
+        <String, Object>{
+          FlutterLifecycleMetricSemantics.lifecycleState.key: state,
+        }.toAttributes();
 
     // Record the state change timestamp
     final now = DateTime.now().millisecondsSinceEpoch;

@@ -110,7 +110,8 @@ class OTelInteractionTracker {
       routeName,
       InteractionType.scroll,
       targetName: scrollableId,
-      attributes: {FlutterScrollSemantics.scrollPosition.key: position}.toAttributes(),
+      attributes:
+          {FlutterScrollSemantics.scrollPosition.key: position}.toAttributes(),
     );
   }
 

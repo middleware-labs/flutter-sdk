@@ -68,7 +68,10 @@ class FlutterOTelMetrics {
       value: duration.inMilliseconds,
       unit: 'ms',
       metricType: 'histogram',
-      attributes: {FlutterPerformanceSemantics.metricName.key: name, ...?attributes},
+      attributes: {
+        FlutterPerformanceSemantics.metricName.key: name,
+        ...?attributes,
+      },
     );
   }
 

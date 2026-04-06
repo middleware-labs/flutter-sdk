@@ -124,9 +124,7 @@ void main() {
 
     setUp(() async {
       await FlutterOTel.reset();
-      await initializeFlutterOTelForTest(
-        serviceName: 'ui-test-service',
-      );
+      await initializeFlutterOTelForTest(serviceName: 'ui-test-service');
 
       navigatorObserver = OTelNavigatorObserver();
 
@@ -353,9 +351,7 @@ void main() {
 
     setUp(() async {
       await FlutterOTel.reset();
-      await initializeFlutterOTelForTest(
-        serviceName: 'ui-test-service',
-      );
+      await initializeFlutterOTelForTest(serviceName: 'ui-test-service');
 
       navigatorObserver = OTelNavigatorObserver();
     });

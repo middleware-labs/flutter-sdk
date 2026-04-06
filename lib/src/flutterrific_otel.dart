@@ -422,7 +422,9 @@ class FlutterOTel {
         } catch (e) {
           // Guard against accessing tracerProvider after reset
           if (OTelLog.isDebug()) {
-            OTelLog.debug('FlutterOTel flush timer error (likely post-reset): $e');
+            OTelLog.debug(
+              'FlutterOTel flush timer error (likely post-reset): $e',
+            );
           }
         }
       });
@@ -677,8 +679,7 @@ class FlutterOTel {
             ErrorSemantics.errorMessage.key: error.toString(),
             FlutterErrorSemantics.errorContext.key: message,
             if (stackTrace != null)
-              ExceptionResource.exceptionStacktrace.key:
-                  stackTrace.toString(),
+              ExceptionResource.exceptionStacktrace.key: stackTrace.toString(),
             ...?attributes,
           };
           logger('flutter.error').emit(

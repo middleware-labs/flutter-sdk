@@ -150,7 +150,8 @@ class UILogger implements Logger {
     final attrs = <String, Object>{
       ErrorSemantics.errorType.key: errorType,
       ErrorSemantics.errorMessage.key: errorMessage,
-      if (widgetContext != null) FlutterErrorSemantics.errorWidgetContext.key: widgetContext,
+      if (widgetContext != null)
+        FlutterErrorSemantics.errorWidgetContext.key: widgetContext,
       if (stackTrace != null)
         ExceptionResource.exceptionStacktrace.key: stackTrace,
     };
