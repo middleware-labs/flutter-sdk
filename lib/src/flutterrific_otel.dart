@@ -258,6 +258,7 @@ class FlutterOTel {
     MetricExporter? metricExporter,
     MetricReader? metricReader,
     bool enableMetrics = true,
+    RecordingOptions recordingOptions = const RecordingOptions()
   }) async {
     _appName = appName ?? serviceName;
     FlutterOTel.commonAttributesFunction = commonAttributesFunction;
@@ -299,18 +300,14 @@ class FlutterOTel {
         final builder = MiddlewareBuilder(
           target: endpoint,
           rumAccessToken: middlewareAccountKey,
-          recordingOptions: const RecordingOptions(
-            screenshotInterval: Duration(seconds: 2),
-            qualityValue: 80,
-            minResolution: 320,
-            archiveChunkSize: 10,
-          ),
+          recordingOptions: recordingOptions,
         );
 
         _screenshotManager = MiddlewareScreenshotManager(
           builder: builder,
           sessionId: appLaunchId!,
           repaintBoundaryKey: _repaintBoundaryKey,
+
         );
 
         if (kDebugMode) {
