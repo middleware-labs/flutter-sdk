@@ -253,6 +253,7 @@ class UITracer implements sdk.Tracer {
     if (!enabled) {
       return;
     }
+    FlutterOTel.notifyUserSessionActivity();
 
     final spanName = 'interaction.$screenName.$interactionType';
     actionCount++;

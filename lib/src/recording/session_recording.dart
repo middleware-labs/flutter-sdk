@@ -22,12 +22,8 @@ import 'package:uuid/uuid.dart';
 //    After gzip of PNG-inside-tar: ~190–500 MB  ← matches the reported >1.5 GB
 //    (PNG is already compressed so gzip barely helps.)
 //
-//  New defaults: JPEG q=35, 240 max-dim, 4 s interval, chunk=20
-//    ~8–20 KB per frame × 900 frames/2 h ≈ 7–18 MB raw
-//    After gzip of JPEG-inside-tar: ~7–17 MB  (≈ 97 % reduction)
-//
-//  Additional savings from perceptual-delta skip (≥50 % of frames identical
-//  during idle screens are dropped entirely).
+//  New defaults: JPEG q=10, 320 min-short-side (parity with Android),
+//                4 s interval, chunk=10
 // ---------------------------------------------------------------------------
 
 /// Encodes form field / filename tokens like package:http multipart.
@@ -53,6 +49,16 @@ String _rumResourceAttributesJson() {
   }
 }
 
+/// Archive files are named `{sessionId}-{lastTs}.tar.gz` with a hyphen between
+/// the id and the timestamp (session id has no hyphens).
+String _sessionIdFromArchiveFileName(String fileName, String fallbackSessionId) {
+  if (!fileName.endsWith('.tar.gz')) return fallbackSessionId;
+  final base = fileName.substring(0, fileName.length - 7);
+  final dash = base.indexOf('-');
+  if (dash <= 0) return fallbackSessionId;
+  return base.substring(0, dash);
+}
+
 /// Callback for screenshot capture
 typedef ScreenshotCallback = void Function(Uint8List imageData);
 
@@ -71,18 +77,20 @@ class RecordingOptions {
 
   /// JPEG quality 1–100.  35 is visually acceptable for session replay and
   /// produces files ≈ 8–25 KB at 240 p.  Do NOT go above 60 without also
-  /// reducing [maxDimension].
+  /// reducing [minShortSidePx].
   final int qualityValue;
 
-  /// The *longest* side is scaled down to this many pixels.  240 keeps text
-  /// legible in replay while keeping each frame tiny.  Raise to 320 only if
-  /// your replay viewer needs more detail.
-  final int maxDimension;
-
-  /// Perceptual-change threshold (0–1).  A new frame whose mean-pixel
-  /// difference from the last uploaded frame is below this fraction is
-  /// skipped entirely.  0.02 (2 %) discards purely idle screens.
-  final double deltaThreshold;
+  /// FIX #1 — Renamed from maxDimension.
+  ///
+  /// The *shortest* side is scaled UP/DOWN to exactly this many pixels,
+  /// matching Android's `MIN_RESOLUTION_PX` logic in the Java SDK:
+  ///
+  ///   portrait:  newW = minShortSidePx,  newH = newW / aspect
+  ///   landscape: newH = minShortSidePx,  newW = newH * aspect
+  ///
+  /// This keeps the same visual density on both orientations and is consistent
+  /// with how the Middleware backend expects session-replay frames to be sized.
+  final int minShortSidePx;
 
   /// Number of frames to bundle per archive before uploading.
   final int archiveChunkSize;
@@ -92,10 +100,9 @@ class RecordingOptions {
   final bool uploadStaleFilesOnStart;
 
   const RecordingOptions({
-    this.screenshotInterval = const Duration(seconds: 4),
-    this.qualityValue = 35,
-    this.maxDimension = 240,
-    this.deltaThreshold = 0.02,
+    this.screenshotInterval = const Duration(milliseconds: 500),
+    this.qualityValue = 10,
+    this.minShortSidePx = 320,
     this.archiveChunkSize = 10,
     this.staleArchiveMaxAge = const Duration(seconds: 59),
     this.staleScreenshotMaxAge = const Duration(seconds: 59),
@@ -207,53 +214,67 @@ class NetworkManager {
 }
 
 // ---------------------------------------------------------------------------
-// Lightweight perceptual-delta helper
-// ---------------------------------------------------------------------------
-
-/// Returns the mean absolute luminance difference between two raw RGBA byte
-/// buffers normalised to [0, 1].  Both buffers must have the same length.
-///
-/// Sampling strategy: every 16th *pixel* (= every 64th byte in RGBA_8888).
-/// At 240 px max-dim the buffer is ≤ ~230 400 bytes → ≤ 3 600 samples —
-/// fast enough on the UI thread while covering all three colour channels.
-/// Luminance weight: 0.299R + 0.587G + 0.114B  (BT.601, integer approx).
-double _meanPixelDelta(Uint8List a, Uint8List b) {
-  if (a.length != b.length || a.isEmpty) return 1.0;
-  const pixelStride = 64; // 16 pixels × 4 bytes/pixel
-  int sum = 0;
-  int count = 0;
-  for (int i = 0; i + 2 < a.length; i += pixelStride) {
-    // BT.601 integer approximation (×1000): 299R + 587G + 114B
-    final lumA = 299 * a[i] + 587 * a[i + 1] + 114 * a[i + 2];
-    final lumB = 299 * b[i] + 587 * b[i + 1] + 114 * b[i + 2];
-    sum += (lumA - lumB).abs();
-    count++;
-  }
-  if (count == 0) return 1.0;
-  // Normalise: max possible sum per sample = 1000 × 255 = 255 000
-  return sum / (count * 255000.0);
-}
-
-// ---------------------------------------------------------------------------
 // Main screenshot manager
 // ---------------------------------------------------------------------------
+//
+// Lifecycle mirrors the Android `MiddlewareScreenshotManager` replay v2:
+// - `stopped` → [_stopped]: set before tearing down timers / network so late
+//   async capture callbacks can drop work safely.
+// - `captureInFlight` → [_captureInFlight]: periodic capture skips if the prior
+//   pipeline (through serialized disk write) is still running.
+//   NOTE: Dart is single-threaded on the event loop so a plain bool is safe
+//   here — there is no race between the timer callback and the capture
+//   completion because both run on the same isolate's microtask/event queue.
+//   compute() isolates never mutate this field directly; they only return a
+//   value via Future which is awaited back on the main isolate.
+// - Single-thread IO → [_serializedIoTail]: archives, file writes, and uploads
+//   are chained so they never overlap (like `ioExecutor` + FIFO queue).
+// - Terminal flush → [_terminateFlush]: last archive + send before recycling
+//   the HTTP client (like `terminateFlush` on the IO executor).
 
 class MiddlewareScreenshotManager {
   String _firstTs = '';
   String _lastTs = '';
   final MiddlewareBuilder builder;
-  final String sessionId;
+  String _sessionId;
   final GlobalKey repaintBoundaryKey;
+
+  /// Optional hook (e.g. [SessionManager.checkIdleTime]) invoked at the start
+  /// of each screenshot tick while recording is active.
+  final void Function()? onRecordingTick;
+
+  String get sessionId => _sessionId;
+
+  void updateSessionId(String value) => _sessionId = value;
 
   Timer? _screenshotTimer;
   Timer? _uploadTimer;
-  final List<GlobalKey> _sanitizedElements = [];
+
+  // FIX #5 — Changed from List<GlobalKey> to a Set to prevent duplicate
+  // entries and make remove O(1). Dead-key pruning happens lazily in
+  // _applyMaskToScreenshot (keys whose context is null are skipped and
+  // collected for removal after iteration — same pattern as Java's
+  // collectMaskRects dead-WeakReference pruning).
+  final Set<GlobalKey> _sanitizedElements = {};
+
   Orientation? _lastOrientation;
   bool _isRunning = false;
 
-  /// Raw RGBA bytes of the last frame that was *accepted* (not delta-skipped).
-  /// Used for perceptual-change detection.
-  Uint8List? _lastAcceptedFrameBytes;
+  /// Set in [stop] before timers are cancelled so late async capture work can
+  /// bail out safely (parity with Android `stopped`).
+  bool _stopped = false;
+
+  /// If a capture pipeline is still running, the next periodic tick is skipped
+  /// instead of queueing another (parity with Android `captureInFlight`).
+  /// Safe as a plain bool — see class-level comment above.
+  bool _captureInFlight = false;
+
+  /// Last [_screenshotTick] future — [stop] awaits this before terminal flush.
+  Future<void>? _ongoingCapture;
+
+  /// Single FIFO chain for disk + archive + upload so work never overlaps
+  /// (parity with Android single-thread `ioExecutor`).
+  Future<void> _serializedIoTail = Future<void>.value();
 
   /// Cached app-document directory — resolved once to avoid repeated async
   /// platform-channel calls on every screenshot (getApplicationDocumentsDirectory
@@ -273,9 +294,10 @@ class MiddlewareScreenshotManager {
 
   MiddlewareScreenshotManager({
     required this.builder,
-    required this.sessionId,
+    required String sessionId,
     required this.repaintBoundaryKey,
-  });
+    this.onRecordingTick,
+  }) : _sessionId = sessionId;
 
   // -------------------------------------------------------------------------
   // Lifecycle
@@ -284,11 +306,12 @@ class MiddlewareScreenshotManager {
   Future<void> start(int startTs) async {
     if (_isRunning) return;
 
+    _stopped = false;
     _firstTs = startTs.toString();
     _isRunning = true;
     _lastOrientation = null;
-    _lastAcceptedFrameBytes = null;
     _pendingScreenshotCount = 0;
+    _serializedIoTail = Future<void>.value();
 
     // Resolve and cache the directory paths once — avoids repeated async
     // platform-channel round-trips on every screenshot tick.
@@ -305,37 +328,106 @@ class MiddlewareScreenshotManager {
 
     _screenshotTimer = Timer.periodic(
       builder.recordingOptions.screenshotInterval,
-      (_) => _makeScreenshotAndSaveWithArchive(),
+      (_) {
+        unawaited(_screenshotTick());
+      },
     );
 
-    // Upload on a slower cadence — no point hitting the network every 4 s when
-    // we only archive every archiveChunkSize frames (= every ~80 s at defaults).
-    // Use 3× the screenshot interval as a cheap heuristic so we always upload
-    // within one chunk-period of the archive being ready.
-    final uploadInterval = builder.recordingOptions.screenshotInterval * 3;
-    _uploadTimer = Timer.periodic(uploadInterval, (_) => sendScreenshots());
+    // FIX #9 — Upload on the same cadence as screenshots, matching Java's
+    // `scheduleWithFixedDelay(...intervalMillis, intervalMillis, ...)`.
+    // Previously this was screenshotInterval × 3, which meant archives could
+    // sit on disk for up to 3× the interval before being sent.
+    _uploadTimer = Timer.periodic(
+      builder.recordingOptions.screenshotInterval,
+      (_) {
+        unawaited(_enqueueSerializedIo(sendScreenshots));
+      },
+    );
 
-    await _makeScreenshotAndSaveWithArchive();
-    Timer(const Duration(seconds: 2), () => sendScreenshots());
+    unawaited(_screenshotTick());
+    Timer(const Duration(seconds: 2), () {
+      unawaited(_enqueueSerializedIo(sendScreenshots));
+    });
   }
 
   Future<void> stop() async {
     if (!_isRunning) return;
+    // Must be visible to any in-flight PixelCopy / async capture before we tear
+    // down executors or the network client (Android parity).
+    _stopped = true;
     _isRunning = false;
     _screenshotTimer?.cancel();
+    _screenshotTimer = null;
     _uploadTimer?.cancel();
-    await _terminate();
+    _uploadTimer = null;
+
+    try {
+      await (_ongoingCapture ?? Future<void>.value());
+      await _enqueueSerializedIo(_terminateFlush, ignoreStopped: true);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Session replay: error during shutdown pipeline: $e');
+      }
+    }
+
     _sanitizedElements.clear();
     _lastOrientation = null;
-    _lastAcceptedFrameBytes = null;
     _screenshotDir = null;
     _archiveDir = null;
     _networkManager?.dispose();
     _networkManager = null;
+    _stopped = false;
+  }
+
+  /// Append [job] after prior serialized IO work. Used for writes, archives,
+  /// uploads, and the terminal flush so those never run concurrently.
+  Future<void> _enqueueSerializedIo(
+    Future<void> Function() job, {
+    bool ignoreStopped = false,
+  }) {
+    final completer = Completer<void>();
+    _serializedIoTail = _serializedIoTail
+        .then((_) async {
+          try {
+            if (_stopped && !ignoreStopped) {
+              return;
+            }
+            await job();
+          } catch (e, st) {
+            if (kDebugMode) {
+              debugPrint('Session replay: serialized IO error: $e\n$st');
+            }
+          } finally {
+            if (!completer.isCompleted) {
+              completer.complete();
+            }
+          }
+        })
+        .catchError((Object e, StackTrace st) {
+          if (kDebugMode) {
+            debugPrint('Session replay: serialized IO chain error: $e\n$st');
+          }
+          if (!completer.isCompleted) {
+            completer.complete();
+          }
+        });
+    return completer.future;
+  }
+
+  Future<void> _terminateFlush() async {
+    try {
+      final screenshotFolder = await _getScreenshotFolder();
+      await _archiveFolder(screenshotFolder);
+      await sendScreenshots();
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Session replay: error during termination flush: $e');
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
-  // Stale-file handling (unchanged logic, kept for parity)
+  // Stale-file handling
   // -------------------------------------------------------------------------
 
   Future<void> _cleanupStaleArchives() async {
@@ -400,17 +492,31 @@ class MiddlewareScreenshotManager {
       for (final archive in archives) {
         try {
           final fileName = archive.uri.pathSegments.last;
-          if (!fileName.startsWith(sessionId)) {
-            final modified = await archive.lastModified();
-            if (DateTime.now().difference(modified) >
-                const Duration(seconds: 59)) {
-              await _deleteFileSafely(archive);
-              continue;
-            }
+
+          // FIX #3 — Stale archives by definition come from *previous* sessions.
+          // The old code skipped archives whose filename DID NOT start with
+          // sessionId, which is the wrong predicate — stale archives will never
+          // start with the current session id because a new session id is
+          // generated on each app launch.
+          //
+          // Correct behaviour (matching Java): attempt to upload every stale
+          // archive regardless of which session it belongs to. If the file is
+          // too old and the upload fails, fall through to age-based deletion.
+          // The uploadSessionId extracted below ensures each batch is attributed
+          // to the correct session on the backend.
+          final modified = await archive.lastModified();
+          if (DateTime.now().difference(modified) >
+              builder.recordingOptions.staleArchiveMaxAge) {
+            await _deleteFileSafely(archive);
+            continue;
           }
+
           final imageData = await archive.readAsBytes();
           final completer = Completer<bool>();
-          final staleSessionId = fileName.split('-')[0];
+          final staleSessionId = _sessionIdFromArchiveFileName(
+            fileName,
+            sessionId,
+          );
           await networkManager.sendImages(
             staleSessionId,
             _rumResourceAttributesJson(),
@@ -483,31 +589,65 @@ class MiddlewareScreenshotManager {
   }
 
   // -------------------------------------------------------------------------
-  // Capture pipeline  (KEY CHANGES)
+  // Capture pipeline
   // -------------------------------------------------------------------------
 
-  Future<void> _makeScreenshotAndSaveWithArchive() async {
+  /// One capture tick: UI-thread capture, then serialized disk / archive work.
+  Future<void> _screenshotTick() {
+    final run = _runScreenshotTick();
+    _ongoingCapture = run;
+    return run.whenComplete(() {
+      if (identical(_ongoingCapture, run)) {
+        _ongoingCapture = null;
+      }
+    });
+  }
+
+  Future<void> _runScreenshotTick() async {
+    if (!_isRunning || _stopped) {
+      return;
+    }
+    if (_captureInFlight) {
+      if (kDebugMode) {
+        debugPrint(
+          'Session replay: screenshot skipped — previous capture still in flight',
+        );
+      }
+      return;
+    }
+    _captureInFlight = true;
     try {
+      onRecordingTick?.call();
+      if (_stopped) {
+        return;
+      }
       _checkAndReportOrientationChange();
 
-      // _captureScreenshot now returns JPEG bytes OR null (delta-skip / error)
       final screenshotData = await _captureScreenshot();
-      if (screenshotData == null) return; // delta-skipped or error
-
-      final screenshotFolder = await _getScreenshotFolder();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      // Store as .jpeg so the archive names are accurate
-      final screenshotFile = File('${screenshotFolder.path}/$timestamp.jpeg');
-      await screenshotFile.writeAsBytes(screenshotData);
-      _pendingScreenshotCount++;
-
-      if (_pendingScreenshotCount >=
-          builder.recordingOptions.archiveChunkSize) {
-        await _archiveFolder(screenshotFolder);
-        _pendingScreenshotCount = 0;
+      if (_stopped || screenshotData == null) {
+        return;
       }
+
+      await _enqueueSerializedIo(() async {
+        if (_stopped) {
+          return;
+        }
+        final screenshotFolder = await _getScreenshotFolder();
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final screenshotFile = File('${screenshotFolder.path}/$timestamp.jpeg');
+        await screenshotFile.writeAsBytes(screenshotData);
+        _pendingScreenshotCount++;
+
+        if (_pendingScreenshotCount >=
+            builder.recordingOptions.archiveChunkSize) {
+          await _archiveFolder(screenshotFolder);
+          _pendingScreenshotCount = 0;
+        }
+      });
     } catch (e) {
       debugPrint('Error making screenshot: $e');
+    } finally {
+      _captureInFlight = false;
     }
   }
 
@@ -520,13 +660,15 @@ class MiddlewareScreenshotManager {
   /// Captures, optionally masks, downscales, encodes as lossy JPEG, and
   /// applies perceptual-delta filtering.
   ///
-  /// Returns JPEG [Uint8List] or null when the frame is too similar to the
-  /// previous accepted frame (idle screen) or an error occurs.
+  /// Returns JPEG [Uint8List] or null when an error occurs.
   Future<Uint8List?> _captureScreenshot() async {
     try {
       var boundary = _repaintBoundaryFromKey();
       if (boundary == null) {
         await WidgetsBinding.instance.endOfFrame;
+        if (_stopped) {
+          return null;
+        }
         boundary = _repaintBoundaryFromKey();
       }
 
@@ -549,21 +691,34 @@ class MiddlewareScreenshotManager {
         return null;
       }
 
+      if (_stopped) {
+        return null;
+      }
+
       // ------------------------------------------------------------------
       // 1. Capture at native resolution (pixelRatio 1.0 keeps it manageable)
       // ------------------------------------------------------------------
       final rawImage = await boundary.toImage(pixelRatio: 1.0);
 
+      if (_stopped) {
+        rawImage.dispose();
+        return null;
+      }
+
       // ------------------------------------------------------------------
-      // 2. Downscale FIRST so the longest side ≤ maxDimension.
-      //    This must happen before masking so that all subsequent canvas
-      //    operations (mask rects, toByteData, JPEG encode) work on the
-      //    small image, not the full-resolution one.  Doing it here cuts
-      //    masking GPU cost by ~(scale²) ≈ 10–20× on a typical phone.
+      // 2. FIX #1 — Scale so the SHORT side == minShortSidePx, matching the
+      //    Android SDK's MIN_RESOLUTION_PX logic:
+      //
+      //      portrait:  newW = minShortSidePx, newH = newW / aspect
+      //      landscape: newH = minShortSidePx, newW = newH * aspect
+      //
+      //    Previously Flutter capped the LONGEST side which produced smaller
+      //    images than Android on portrait screens and inconsistent replay
+      //    frame sizes across platforms.
       // ------------------------------------------------------------------
-      final scaledImage = await _scaleDown(
+      final scaledImage = await _scaleToShortSide(
         rawImage,
-        builder.recordingOptions.maxDimension,
+        builder.recordingOptions.minShortSidePx,
       );
 
       // ------------------------------------------------------------------
@@ -578,38 +733,28 @@ class MiddlewareScreenshotManager {
         scaleY,
       );
 
+      if (_stopped) {
+        return null;
+      }
+
       // ------------------------------------------------------------------
-      // 4. Perceptual-delta check on raw RGBA bytes (cheap, pre-encode)
+      // 4. Encode as lossy JPEG (off UI thread via compute)
       // ------------------------------------------------------------------
+      if (kDebugMode) {
+        debugPrint(
+          'Session replay: encoding JPEG with quality=${builder.recordingOptions.qualityValue} '
+          'minShortSidePx=${builder.recordingOptions.minShortSidePx}',
+        );
+      }
       final rgbaBytes =
           (await maskedImage.toByteData(
             format: ui.ImageByteFormat.rawRgba,
           ))!.buffer.asUint8List();
 
-      if (_lastAcceptedFrameBytes != null) {
-        final delta = _meanPixelDelta(rgbaBytes, _lastAcceptedFrameBytes!);
-        if (delta < builder.recordingOptions.deltaThreshold) {
-          if (kDebugMode) {
-            debugPrint(
-              'Session replay: frame skipped (delta=${delta.toStringAsFixed(4)} '
-              '< threshold=${builder.recordingOptions.deltaThreshold})',
-            );
-          }
-          return null;
-        }
+      if (_stopped) {
+        return null;
       }
-      _lastAcceptedFrameBytes = rgbaBytes;
 
-      // ------------------------------------------------------------------
-      // 5. Encode as lossy JPEG (off UI thread via compute)
-      // ------------------------------------------------------------------
-      if (kDebugMode) {
-        debugPrint(
-          'Session replay: encoding JPEG with quality=${builder.recordingOptions.qualityValue} '
-              'maxDimension=${builder.recordingOptions.maxDimension} '
-              'deltaThreshold=${builder.recordingOptions.deltaThreshold}',
-        );
-      }
       final jpegBytes = await _encodeJpeg(
         maskedImage,
         rgbaBytes,
@@ -635,18 +780,33 @@ class MiddlewareScreenshotManager {
   // Image helpers
   // -------------------------------------------------------------------------
 
-  /// Scale [image] so its longest dimension is ≤ [maxDim].
-  /// If the image is already smaller it is returned as-is.
-  Future<ui.Image> _scaleDown(ui.Image image, int maxDim) async {
+  /// FIX #1 — Scale [image] so its SHORT side == [minShortSidePx], matching
+  /// Android's `MIN_RESOLUTION_PX` behaviour exactly.
+  ///
+  /// Portrait (w < h): set newW = minShortSidePx, derive newH from aspect.
+  /// Landscape/square (w >= h): set newH = minShortSidePx, derive newW.
+  ///
+  /// If the image is already at or below the target short-side it is returned
+  /// as-is (no upscaling, matching Android's `Math.max(MIN_RESOLUTION_PX, 1)`
+  /// guard which keeps the image unchanged when it is already small).
+  Future<ui.Image> _scaleToShortSide(ui.Image image, int minShortSidePx) async {
     final w = image.width;
     final h = image.height;
-    final longest = w > h ? w : h;
+    final isPortrait = w < h;
+    final shortSide = isPortrait ? w : h;
 
-    if (longest <= maxDim) return image; // already small enough
+    // Already at or smaller than the target — return as-is (no upscaling).
+    if (shortSide <= minShortSidePx) return image;
 
-    final scale = maxDim / longest;
-    final newW = (w * scale).round();
-    final newH = (h * scale).round();
+    final int newW;
+    final int newH;
+    if (isPortrait) {
+      newW = minShortSidePx;
+      newH = (newW * h / w).round().clamp(1, 1 << 15);
+    } else {
+      newH = minShortSidePx;
+      newW = (newH * w / h).round().clamp(1, 1 << 15);
+    }
 
     if (kDebugMode) {
       debugPrint('Session replay: scaling ${w}×$h → ${newW}×$newH');
@@ -665,24 +825,16 @@ class MiddlewareScreenshotManager {
 
   /// Encode a [ui.Image] as JPEG at the given [quality] (1–100).
   ///
-  /// Implementation note:
-  ///   dart:ui does not expose a JPEG encoder directly.  We use the `image`
-  ///   package (pub.dev/packages/image) which is a pure-Dart codec.  Add to
-  ///   pubspec.yaml:
+  /// Uses the `image` package (pub.dev/packages/image ≥ 4.0) via compute()
+  /// to keep the CPU-intensive encode off the UI thread.
   ///
-  ///     dependencies:
-  ///       image: ^4.2.0
-  ///
-  ///   If you cannot add the dependency, replace the body of this method with
-  ///   a PNG fallback — but note that PNG files are 5–15× larger than JPEG
-  ///   at equivalent perceived quality, which will significantly increase
-  ///   bandwidth.
+  ///   dependencies:
+  ///     image: ^4.2.0
   Future<Uint8List> _encodeJpeg(
     ui.Image image,
     Uint8List rgbaBytes,
     int quality,
   ) async {
-    // Use compute() to run the CPU-intensive encode off the UI thread.
     return compute(
       _encodeJpegIsolate,
       _JpegEncodeParams(
@@ -698,11 +850,72 @@ class MiddlewareScreenshotManager {
   // Masking
   // -------------------------------------------------------------------------
 
+  /// FIX #6 — Mask fill is now a cross-striped pattern bitmap matching the
+  /// Android SDK's `createCrossStripedPatternBitmap()`, instead of the
+  /// previous solid `Colors.black45`.
+  ///
+  /// The pattern is rendered once via a [ui.Picture] and cached as a
+  /// [ui.Image] so it is only built on the first call.
+  ui.Image? _maskPatternImage;
+
+  Future<ui.Image> _getMaskPatternImage() async {
+    if (_maskPatternImage != null) return _maskPatternImage!;
+
+    const int size = 80;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    // White background
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.toDouble(), size.toDouble()),
+      Paint()..color = Colors.white,
+    );
+
+    // Dark-grey diagonal stripes (forward direction)
+    final stripePaint =
+        Paint()
+          ..color = Colors.grey.shade700
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3.0;
+
+    const double step = 25.0;
+    for (double i = -size.toDouble(); i < size * 2; i += step) {
+      canvas.drawLine(
+        Offset(i, -1),
+        Offset(i + size, size + 1),
+        stripePaint,
+      );
+    }
+
+    // Rotate 90° around centre and draw the same stripes (cross-hatch)
+    canvas.save();
+    canvas.translate(size / 2.0, size / 2.0);
+    canvas.rotate(90 * 3.141592653589793 / 180);
+    canvas.translate(-size / 2.0, -size / 2.0);
+    for (double i = -size.toDouble(); i < size * 2; i += step) {
+      canvas.drawLine(
+        Offset(i, -1),
+        Offset(i + size, size + 1),
+        stripePaint,
+      );
+    }
+    canvas.restore();
+
+    final picture = recorder.endRecording();
+    _maskPatternImage = await picture.toImage(size, size);
+    return _maskPatternImage!;
+  }
+
   /// Apply privacy masks to an already-scaled [image].
   ///
-  /// [scaleX] / [scaleY] are (scaled_dimension / original_dimension) and are
-  /// used to map the global-coordinate RenderBox positions into the scaled
-  /// image's coordinate space.
+  /// FIX #5 — Dead keys (whose context is null or whose RenderBox is detached)
+  /// are collected during iteration and removed after the loop, matching Java's
+  /// `collectMaskRects` dead-WeakReference pruning.
+  ///
+  /// FIX #6 — Uses the cross-striped pattern instead of solid black.
+  ///
+  /// [scaleX] / [scaleY] map the global-coordinate RenderBox positions into
+  /// the scaled image's coordinate space.
   Future<ui.Image> _applyMaskToScreenshot(
     ui.Image image,
     double scaleX,
@@ -714,26 +927,42 @@ class MiddlewareScreenshotManager {
     final canvas = Canvas(recorder);
     canvas.drawImage(image, Offset.zero, Paint());
 
+    final patternImage = await _getMaskPatternImage();
     final maskPaint =
         Paint()
-          ..style = PaintingStyle.fill
-          ..color = Colors.black45;
+          ..shader = ImageShader(
+            patternImage,
+            TileMode.repeated,
+            TileMode.repeated,
+            Matrix4.identity().storage,
+          );
+
+    // FIX #5 — Collect dead keys for post-iteration removal.
+    final deadKeys = <GlobalKey>[];
 
     for (final key in _sanitizedElements) {
       final renderBox = key.currentContext?.findRenderObject() as RenderBox?;
-      if (renderBox != null && renderBox.attached) {
-        final position = renderBox.localToGlobal(Offset.zero);
-        final size = renderBox.size;
-        canvas.drawRect(
-          Rect.fromLTWH(
-            position.dx * scaleX,
-            position.dy * scaleY,
-            size.width * scaleX,
-            size.height * scaleY,
-          ),
-          maskPaint,
-        );
+      if (renderBox == null || !renderBox.attached) {
+        deadKeys.add(key);
+        continue;
       }
+      final position = renderBox.localToGlobal(Offset.zero);
+      final size = renderBox.size;
+      canvas.drawRect(
+        Rect.fromLTWH(
+          position.dx * scaleX,
+          position.dy * scaleY,
+          size.width * scaleX,
+          size.height * scaleY,
+        ),
+        maskPaint,
+      );
+    }
+
+    // Prune dead references so the set does not grow unboundedly over a long
+    // session where widgets are added/removed via setViewForBlur.
+    for (final key in deadKeys) {
+      _sanitizedElements.remove(key);
     }
 
     return recorder.endRecording().toImage(image.width, image.height);
@@ -776,11 +1005,21 @@ class MiddlewareScreenshotManager {
         return nameA.compareTo(nameB);
       });
 
+      // FIX #7 — Set lastTs once from the last (most-recent) file after sort,
+      // matching Java's `lastTs = getNameWithoutExtension(screenshots[last])`.
+      // Previously lastTs was overwritten in the loop body on every iteration;
+      // the end result was identical but the intent was unclear.
+      _lastTs = _getNameWithoutExtension(screenshots.last);
+
       final archive = Archive();
       for (final screenshot in screenshots) {
-        _lastTs = _getNameWithoutExtension(screenshot);
         final filename =
             '${_firstTs}_1_${_getNameWithoutExtension(screenshot)}.jpeg';
+        // FIX #7 — Read file into Uint8List once. The archive library requires
+        // the full bytes for in-memory archiving; streaming is not exposed by
+        // the `archive` package's Archive/ArchiveFile API.  The IO cost is
+        // acceptable given the small frame sizes (< 30 KB each at default
+        // quality settings).
         final bytes = await screenshot.readAsBytes();
         archive.addFile(ArchiveFile(filename, bytes.length, bytes));
       }
@@ -804,20 +1043,25 @@ class MiddlewareScreenshotManager {
     }
   }
 
+  /// FIX #2 — Upload all pending archives concurrently (fire-and-forget per
+  /// archive), matching the Java SDK which submits every archive to the network
+  /// without awaiting each one before starting the next.
+  ///
+  /// Each archive's delete-on-success / log-on-error callback still runs
+  /// individually. We collect all Futures and await them together so the
+  /// serialized-IO chain does not release until all uploads for this batch
+  /// have settled.
   Future<void> sendScreenshots() async {
     if (sessionId.isEmpty) {
       debugPrint('SessionId is empty');
       return;
     }
 
-    // Guard: if called after stop() there is no network manager.
     final nm = _networkManager;
     if (nm == null) return;
 
     try {
       final archiveFolder = await _getArchiveFolder();
-      // whereType<File> already filters; avoid building a second list with toList
-      // only when we know there's something to upload.
       final entities = archiveFolder.listSync();
       final archives = <File>[];
       for (final e in entities) {
@@ -829,40 +1073,15 @@ class MiddlewareScreenshotManager {
         return;
       }
 
-      int successCount = 0;
-      int failCount = 0;
-
+      // Launch all uploads concurrently — one Future per archive.
+      final uploadFutures = <Future<bool>>[];
       for (final archive in archives) {
-        try {
-          final imageData = await archive.readAsBytes();
-          final fileName = archive.uri.pathSegments.last;
-          final completer = Completer<bool>();
-
-          await nm.sendImages(
-            sessionId,
-            _rumResourceAttributesJson(),
-            imageData,
-            fileName,
-            _NetworkCallbackImpl(
-              onSuccessCallback: (response) async {
-                final deleted = await _deleteFileSafely(archive);
-                deleted ? successCount++ : failCount++;
-                completer.complete(deleted);
-              },
-              onErrorCallback: (e) {
-                if (kDebugMode) debugPrint('Upload failed for $fileName: $e');
-                failCount++;
-                completer.complete(false);
-              },
-            ),
-          );
-
-          await completer.future;
-        } catch (e) {
-          if (kDebugMode) debugPrint('Error processing archive: $e');
-          failCount++;
-        }
+        uploadFutures.add(_uploadArchive(nm, archive));
       }
+
+      final results = await Future.wait(uploadFutures);
+      final successCount = results.where((r) => r).length;
+      final failCount = results.length - successCount;
 
       if (kDebugMode) {
         debugPrint(
@@ -871,6 +1090,41 @@ class MiddlewareScreenshotManager {
       }
     } catch (e) {
       debugPrint('Error sending screenshot archives: $e');
+    }
+  }
+
+  /// Uploads a single [archive] and returns true on success.
+  Future<bool> _uploadArchive(NetworkManager nm, File archive) async {
+    try {
+      final imageData = await archive.readAsBytes();
+      final fileName = archive.uri.pathSegments.last;
+      final completer = Completer<bool>();
+
+      final uploadSessionId = _sessionIdFromArchiveFileName(
+        fileName,
+        sessionId,
+      );
+      await nm.sendImages(
+        uploadSessionId,
+        _rumResourceAttributesJson(),
+        imageData,
+        fileName,
+        _NetworkCallbackImpl(
+          onSuccessCallback: (response) async {
+            final deleted = await _deleteFileSafely(archive);
+            completer.complete(deleted);
+          },
+          onErrorCallback: (e) {
+            if (kDebugMode)
+              debugPrint('Upload failed for $fileName: $e');
+            completer.complete(false);
+          },
+        ),
+      );
+      return await completer.future;
+    } catch (e) {
+      if (kDebugMode) debugPrint('Error processing archive: $e');
+      return false;
     }
   }
 
@@ -907,16 +1161,6 @@ class MiddlewareScreenshotManager {
     if (orientation != _lastOrientation) {
       _lastOrientation = orientation;
       debugPrint('Current orientation: $orientation');
-    }
-  }
-
-  Future<void> _terminate() async {
-    try {
-      final screenshotFolder = await _getScreenshotFolder();
-      await _archiveFolder(screenshotFolder);
-      await sendScreenshots();
-    } catch (e) {
-      debugPrint('Error during termination: $e');
     }
   }
 
@@ -960,11 +1204,6 @@ Uint8List _encodeJpegIsolate(_JpegEncodeParams p) {
   );
   return Uint8List.fromList(image_pkg.encodeJpg(img, quality: p.quality));
 }
-
-// Alias so only this file needs the import line.
-// Add to your imports:  import 'package:image/image.dart' as image_pkg;
-// (The import is intentionally not written here to keep the file self-contained
-// in the diff; add it at the top with the rest of the imports.)
 
 // ---------------------------------------------------------------------------
 

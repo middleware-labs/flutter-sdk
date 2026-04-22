@@ -114,7 +114,9 @@ export 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart
         TraceIdRatioSampler;
 
 export 'src/common/otel_lifecycle_observer.dart';
+export 'src/session/session_manager.dart';
 export 'src/flutterrific_otel.dart';
+export 'src/instrumentation/user_interaction_instrumentation.dart';
 export 'src/flutterrific_otel_metrics.dart';
 export 'src/metrics/flutter_metric_reporter.dart';
 export 'src/metrics/metric_collector.dart';

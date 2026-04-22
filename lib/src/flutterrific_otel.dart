@@ -12,7 +12,6 @@ import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart
 import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 import 'package:middleware_flutter_opentelemetry/src/factory/otel_flutter_factory.dart';
 import 'package:middleware_flutter_opentelemetry/src/recording/session_recording.dart';
-import 'package:uuid/uuid.dart';
 
 typedef CommonAttributesFunction = Attributes Function();
 
@@ -28,6 +27,7 @@ class CommonAttributeSpanProcessor implements SimpleSpanProcessor {
 
   @override
   Future<void> onStart(Span span, Context? parentContext) async {
+    FlutterOTel.sessionManager?.getSessionMetadata();
     final attrs = commonAttributesFn.call();
     span.addAttributes(attrs);
     if (FlutterOTel.globalAttributes.isNotEmpty) {
@@ -118,6 +118,18 @@ class FlutterOTel {
       throw StateError('FlutterOTel.initialize() must be called first.');
     }
     return _routeObserver!;
+  }
+
+  /// Route name from [routeObserver] for correlating auto-captured gestures.
+  /// Falls back to `unknown_route` when navigation has not updated yet.
+  static String get currentInteractionRouteName {
+    try {
+      final name = _routeObserver?.currentRouteData?.routeName;
+      if (name != null && name.isNotEmpty) {
+        return name;
+      }
+    } catch (_) {}
+    return 'unknown_route';
   }
 
   /// Lifecycle observer for automatic app lifecycle tracing
@@ -227,17 +239,46 @@ class FlutterOTel {
   // TODO - function to get device id
   // TODO - function to use for devs including device_info_plus to call it
   static MiddlewareScreenshotManager? _screenshotManager;
+  static SessionManager? _sessionManager;
   static final GlobalKey _repaintBoundaryKey = GlobalKey();
 
   static MiddlewareScreenshotManager? get screenshotManager =>
       _screenshotManager;
+
+  /// RUM session lifecycle (idle timeout, hourly rotation, replay hooks).
+  static SessionManager? get sessionManager => _sessionManager;
+
+  static void _onRumSessionChanged(String sessionId) {
+    appLaunchId = sessionId;
+    final meta = _sessionManager?.sessionMetadata;
+    sessionStartTime =
+        meta == null
+            ? DateTime.now().millisecondsSinceEpoch
+            : (meta.sessionCreationDateEpoch * 1000).round();
+    setAttributes(<String, Object>{
+      AppLifecycleSemantics.appLaunchId.key: sessionId,
+      'session.id': sessionId,
+      'session.start_time': sessionStartTime!,
+    });
+    _screenshotManager?.updateSessionId(sessionId);
+  }
+
+  /// Notifies the session manager of UI activity (parity with native tap
+  /// notifications). Safe to call from interaction tracing paths.
+  static void notifyUserSessionActivity() {
+    _sessionManager?.notifyUserAction();
+  }
 
   /// Get the repaint boundary key for wrapping your app
   static GlobalKey get repaintBoundaryKey => _repaintBoundaryKey;
   static bool isRecording = false;
   static final Map<String, Object> _globalAttributes = {};
 
-  // and return attributes
+  /// [enableAutomaticUserInteractions] registers a global pointer route that
+  /// records taps, scrolls, and swipes (see [AutomaticUserInteractionTracker]).
+  /// [automaticUserInteractionTapThreshold] separates tap from scroll/swipe
+  /// in logical pixels (default 20).
+  /// [automaticUserInteractionDebug] prints diagnostic messages to the console.
   static Future<void> initialize({
     String? appName,
     String? endpoint,
@@ -258,7 +299,10 @@ class FlutterOTel {
     MetricExporter? metricExporter,
     MetricReader? metricReader,
     bool enableMetrics = true,
-    RecordingOptions recordingOptions = const RecordingOptions()
+    RecordingOptions recordingOptions = const RecordingOptions(),
+    bool enableAutomaticUserInteractions = false,
+    double automaticUserInteractionTapThreshold = 20,
+    bool automaticUserInteractionDebug = false,
   }) async {
     _appName = appName ?? serviceName;
     FlutterOTel.commonAttributesFunction = commonAttributesFunction;
@@ -293,8 +337,17 @@ class FlutterOTel {
     if (OTelLog.isDebug()) OTelLog.debug('Using endpoint: $endpoint');
 
     resourceAttributes ??= sdk.OTel.attributes();
-    appLaunchId = Uuid().v4().replaceAll('-', '');
-    sessionStartTime = DateTime.now().millisecondsSinceEpoch;
+    _sessionManager?.dispose();
+    _sessionManager = SessionManager(
+      sessionChangedCallback: _onRumSessionChanged,
+      sessionEndedCallback: () {
+        sdk.OTel.tracerProvider().forceFlush();
+      },
+    );
+    final initialSession = _sessionManager!.sessionMetadata!;
+    appLaunchId = initialSession.sessionId;
+    sessionStartTime =
+        (initialSession.sessionCreationDateEpoch * 1000).round();
     if (middlewareAccountKey != null && middlewareAccountKey.isNotEmpty) {
       try {
         final builder = MiddlewareBuilder(
@@ -307,7 +360,7 @@ class FlutterOTel {
           builder: builder,
           sessionId: appLaunchId!,
           repaintBoundaryKey: _repaintBoundaryKey,
-
+          onRecordingTick: () => _sessionManager?.checkIdleTime(),
         );
 
         if (kDebugMode) {
@@ -454,6 +507,13 @@ class FlutterOTel {
         sdk.OTel.tracerProvider().forceFlush();
       });
     }
+
+    if (enableAutomaticUserInteractions) {
+      AutomaticUserInteractionTracker.initialize(
+        tapThreshold: automaticUserInteractionTapThreshold,
+        debug: automaticUserInteractionDebug,
+      );
+    }
   }
 
   static Future<void> startSessionRecording() async {
@@ -467,6 +527,7 @@ class FlutterOTel {
     }
 
     try {
+      _sessionManager?.hasRecording = true;
       await _screenshotManager!.start(DateTime.now().millisecondsSinceEpoch);
       if (kDebugMode) {
         debugPrint('Session recording started');
@@ -482,6 +543,7 @@ class FlutterOTel {
   static Future<void> stopSessionRecording() async {
     if (_screenshotManager != null) {
       await _screenshotManager!.stop();
+      _sessionManager?.hasRecording = false;
       if (kDebugMode) {
         debugPrint('Session recording stopped');
       }
@@ -610,6 +672,7 @@ class FlutterOTel {
     Map<String, dynamic>? attributes,
   }) {
     if (!tracer.enabled) return;
+    notifyUserSessionActivity();
 
     // Create interaction attributes
     final interactionAttributes = <String, Object>{
@@ -710,6 +773,7 @@ class FlutterOTel {
         return; //cannot, too early
       }
       if (!tracer.enabled) return;
+      _sessionManager?.incrementErrorCounter();
 
       // Create attribute map
       final errorAttributes = <String, Object>{
@@ -788,7 +852,10 @@ class FlutterOTel {
     if (_lifecycleObserver != null) {
       _lifecycleObserver!.dispose();
     }
+    AutomaticUserInteractionTracker.shutdown();
     stopSessionRecording();
+    _sessionManager?.dispose();
+    _sessionManager = null;
     forceFlush();
   }
 
@@ -802,6 +869,9 @@ class FlutterOTel {
   static reset() {
     // ignore: invalid_use_of_visible_for_testing_member
     sdk.OTel.reset();
+    AutomaticUserInteractionTracker.shutdown();
+    _sessionManager?.dispose();
+    _sessionManager = null;
     try {
       WidgetsBinding.instance.removeObserver(FlutterOTel.lifecycleObserver);
     } catch (e) {
