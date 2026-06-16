@@ -1027,6 +1027,10 @@ class MiddlewareScreenshotManager {
       final tarEncoder = TarEncoder();
       final tarData = tarEncoder.encode(archive);
       final gzipData = GZipEncoder().encode(tarData);
+      if (gzipData == null) {
+        debugPrint('Error archiving folder: gzip encoding returned null');
+        return;
+      }
 
       final archiveFolder = await _getArchiveFolder();
       final archiveFile = File(
