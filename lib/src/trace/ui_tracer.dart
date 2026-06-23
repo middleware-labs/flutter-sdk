@@ -379,11 +379,29 @@ class UITracer implements sdk.Tracer {
           previousStateDuration;
     }
 
+    // Only the genuine first launch (no previous state) is "AppStart". Every
+    // other lifecycle transition is named for the state it entered (e.g.
+    // "AppResumed", "AppPaused", "AppInactive") so we don't emit a stream of
+    // identically-named "AppStart" spans on every resume/pause/etc. The state
+    // is also carried in the app.lifecycle.state attribute.
+    final spanName =
+        previousState == null
+            ? 'AppStart'
+            : 'App${_capitalizeLifecycleState(newState)}';
+
     return startSpan(
-      "AppStart",
+      spanName,
       uiSpanType: UISpanType.appLifecycle,
       attributes: attributeMap.toAttributes(),
     );
+  }
+
+  /// Maps an [api.AppLifecycleStates] to a capitalized name fragment, e.g.
+  /// `resumed` → `Resumed`. Falls back to `Lifecycle` when unknown.
+  static String _capitalizeLifecycleState(api.AppLifecycleStates? state) {
+    final name = state?.name;
+    if (name == null || name.isEmpty) return 'Lifecycle';
+    return name[0].toUpperCase() + name.substring(1);
   }
 
   @override
