@@ -12,6 +12,20 @@ import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart
 import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 import 'package:middleware_flutter_opentelemetry/src/factory/otel_flutter_factory.dart';
 import 'package:middleware_flutter_opentelemetry/src/recording/session_recording.dart';
+import 'package:middleware_flutter_opentelemetry/src/common/otel_lifecycle_observer.dart';
+import 'package:middleware_flutter_opentelemetry/src/factory/otel_flutter_factory.dart';
+import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger.dart';
+import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger_provider.dart';
+import 'package:middleware_flutter_opentelemetry/src/metrics/otel_metrics_bridge.dart';
+import 'package:middleware_flutter_opentelemetry/src/metrics/ui_meter.dart';
+import 'package:middleware_flutter_opentelemetry/src/metrics/ui_meter_provider.dart';
+import 'package:middleware_flutter_opentelemetry/src/nav/otel_navigator_observer.dart';
+import 'package:middleware_flutter_opentelemetry/src/semantics/flutter_semantics.dart';
+import 'package:middleware_flutter_opentelemetry/src/trace/interaction_tracker.dart';
+import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer.dart';
+import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer_provider.dart';
+import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
+import 'package:uuid/uuid.dart';
 
 typedef CommonAttributesFunction = Attributes Function();
 
@@ -71,6 +85,13 @@ class FlutterOTel {
   static const defaultServiceVersion = "0.1.0";
   static const middlewareEndpoint = "https://app.middleware.io";
 
+  /// Whether automatic log events are enabled for lifecycle, navigation,
+  /// and errors. Set via [initialize].
+  static bool _enableAutoLogEvents = true;
+
+  /// Whether automatic log events are enabled.
+  static bool get enableAutoLogEvents => _enableAutoLogEvents;
+
   static OTelLifecycleObserver? _lifecycleObserver;
 
   /// Lifecycle observer for automatic app lifecycle tracing
@@ -108,6 +129,8 @@ class FlutterOTel {
 
   /// An id for the latest app lifecycle
   static Uint8List? currentAppLifecycleId;
+
+  static Timer? _flushTimer;
 
   static OTelNavigatorObserver? _routeObserver;
 
@@ -303,6 +326,17 @@ class FlutterOTel {
     bool enableAutomaticUserInteractions = false,
     double automaticUserInteractionTapThreshold = 20,
     bool automaticUserInteractionDebug = false,
+    // Logs configuration
+    bool enableLogs = true,
+    LogRecordExporter? logRecordExporter,
+    LogRecordProcessor? logRecordProcessor,
+    bool logPrint = false,
+    String logPrintLoggerName = 'dart.print',
+
+    /// Whether to auto-emit structured OTel log events for lifecycle changes,
+    /// navigation, and errors. Defaults to true. Set to false to disable
+    /// automatic log event emission while still enabling manual logger usage.
+    bool enableAutoLogEvents = true,
   }) async {
     _appName = appName ?? serviceName;
     FlutterOTel.commonAttributesFunction = commonAttributesFunction;
@@ -467,6 +501,38 @@ class FlutterOTel {
       interval: Duration(seconds: 1), // Export every second
     );
 
+    // Create platform-specific log exporters if logs enabled and not provided
+    if (enableLogs && logRecordExporter == null && logRecordProcessor == null) {
+      if (kIsWeb) {
+        if (OTelLog.isDebug()) {
+          OTelLog.debug('Creating HTTP log exporter for web platform');
+        }
+        logRecordExporter = OtlpHttpLogRecordExporter(
+          OtlpHttpLogRecordExporterConfig(
+            endpoint: endpoint,
+            compression: false,
+          ),
+        );
+      } else {
+        if (OTelLog.isDebug()) {
+          OTelLog.debug('Creating gRPC log exporter for native platform');
+        }
+        logRecordExporter = OtlpGrpcLogRecordExporter(
+          OtlpGrpcLogRecordExporterConfig(
+            endpoint: endpoint,
+            insecure: !secure,
+          ),
+        );
+      }
+      if (OTelLog.isDebug()) {
+        OTelLog.debug(
+          'Created ${kIsWeb ? "HTTP" : "gRPC"} log record exporter',
+        );
+      }
+    }
+
+    _enableAutoLogEvents = enableAutoLogEvents;
+
     await sdk.OTel.initialize(
       endpoint: endpoint,
       secure: secure,
@@ -482,6 +548,13 @@ class FlutterOTel {
       metricReader: metricReader,
       enableMetrics: enableMetrics,
       middlewareAccountKey: middlewareAccountKey,
+      enableLogs: enableLogs,
+      logRecordExporter: logRecordExporter,
+      logRecordProcessor: logRecordProcessor,
+      logPrint: logPrint,
+      logPrintLoggerName: logPrintLoggerName,
+      dartasticApiKey: dartasticApiKey,
+      tenantId: tenantId,
       detectPlatformResources: detectPlatformResources,
       oTelFactoryCreationFunction: otelFlutterFactoryFactoryFunction,
     );
@@ -503,8 +576,17 @@ class FlutterOTel {
 
     //TODO - move down to Dartastic but make Dartastic default to null
     if (flushTracesInterval != null) {
-      Timer.periodic(flushTracesInterval, (_) {
-        sdk.OTel.tracerProvider().forceFlush();
+      _flushTimer = Timer.periodic(flushTracesInterval, (_) {
+        try {
+          sdk.OTel.tracerProvider().forceFlush();
+        } catch (e) {
+          // Guard against accessing tracerProvider after reset
+          if (OTelLog.isDebug()) {
+            OTelLog.debug(
+              'FlutterOTel flush timer error (likely post-reset): $e',
+            );
+          }
+        }
       });
     }
 
@@ -600,6 +682,27 @@ class FlutterOTel {
     return sdk.OTel.meterProvider() as UIMeterProvider;
   }
 
+  /// Get the LoggerProvider instance.
+  ///
+  /// Returns the [UILoggerProvider] which wraps the SDK LoggerProvider
+  /// and returns [UILogger] instances from [getLogger].
+  static UILoggerProvider get loggerProvider =>
+      sdk.OTel.loggerProvider() as UILoggerProvider;
+
+  /// Get a [UILogger] instance with the given [name].
+  ///
+  /// The logger can be used to emit structured log events following OTel
+  /// semantics. If no name is provided, defaults to the service name.
+  ///
+  /// Example:
+  /// ```dart
+  /// final logger = FlutterOTel.logger('my-feature');
+  /// logger.info('Feature loaded');
+  /// logger.emitEvent('user.action', body: 'Button tapped');
+  /// ```
+  static UILogger logger([String? name]) =>
+      loggerProvider.getLogger(name ?? sdk.OTel.defaultTracerName);
+
   /// Get a Meter with the given name and version
   static UIMeter meter({
     String name = 'flutter.default',
@@ -643,9 +746,13 @@ class FlutterOTel {
     }
     final span = tracer.startSpan(
       'screen.$screenName',
+      context: Context.root, // Start a new trace for each screen
       kind: SpanKind.client,
       attributes:
-          {'ui.screen.name': screenName, 'ui.type': 'screen'}.toAttributes(),
+          {
+            SessionViewSemantics.viewName.key: screenName,
+            FlutterUISemantics.uiType.key: 'screen',
+          }.toAttributes(),
     );
 
     _activeSpans[screenName] = span;
@@ -676,11 +783,12 @@ class FlutterOTel {
 
     // Create interaction attributes
     final interactionAttributes = <String, Object>{
-      'ui.screen.name': screenName,
-      'ui.interaction.type': interactionType,
-      if (targetName != null) 'ui.interaction.target': targetName,
+      SessionViewSemantics.viewName.key: screenName,
+      InteractionSemantics.interactionType.key: interactionType,
+      if (targetName != null)
+        InteractionSemantics.interactionTarget.key: targetName,
       if (responseTime != null)
-        'ui.interaction.response_time_ms': responseTime.inMilliseconds,
+        InteractionSemantics.inputDelay.key: responseTime.inMilliseconds,
       ...?attributes,
     };
 
@@ -688,6 +796,7 @@ class FlutterOTel {
     final spanName = 'interaction.$screenName.$interactionType';
     final span = tracer.startSpan(
       spanName,
+      context: Context.root, // Start a new trace for each interaction
       kind: SpanKind.client,
       attributes: interactionAttributes.toAttributes(),
     );
@@ -742,6 +851,7 @@ class FlutterOTel {
     final spanName = 'navigation.$navigationType';
     final span = tracer.startSpan(
       spanName,
+      context: Context.root, // Start a new trace for each navigation
       kind: SpanKind.client,
       attributes: navAttributes.toAttributes(),
     );
@@ -787,6 +897,7 @@ class FlutterOTel {
       // Record as span
       final span = tracer.startSpan(
         'error.$message',
+        context: Context.root, // Start a new trace for each error
         kind: SpanKind.client,
         attributes: errorAttributes.toAttributes(),
       );
@@ -803,6 +914,29 @@ class FlutterOTel {
             unit: '{errors}',
           )
           .add(1, errorAttributes.toAttributes());
+
+      // Also emit as an OTel log record if auto-log events are enabled
+      if (_enableAutoLogEvents) {
+        try {
+          final logAttrs = <String, Object>{
+            ErrorSemantics.errorType.key: error.runtimeType.toString(),
+            ErrorSemantics.errorMessage.key: error.toString(),
+            FlutterErrorSemantics.errorContext.key: message,
+            if (stackTrace != null)
+              ExceptionResource.exceptionStacktrace.key: stackTrace.toString(),
+            ...?attributes,
+          };
+          logger('flutter.error').emit(
+            severityNumber: Severity.ERROR,
+            severityText: 'ERROR',
+            body: 'Flutter error: $message',
+            attributes: logAttrs.toAttributes(),
+            eventName: FlutterEventNames.appError.key,
+          );
+        } catch (logError) {
+          OTelLog.error('Error emitting log for Flutter error: $logError');
+        }
+      }
     } catch (e, s) {
       // TODO - best alternative?
       OTelLog.error('Error when reporting the Flutter error: $e \n$s');
@@ -820,11 +954,12 @@ class FlutterOTel {
     // Record in both spans and metrics
     final span = tracer.startSpan(
       'perf.$name',
+      context: Context.root, // Start a new trace for each performance metric
       kind: SpanKind.client,
       attributes:
           <String, Object>{
-            'perf.metric.name': name,
-            'perf.duration_ms': duration.inMilliseconds,
+            FlutterPerformanceSemantics.metricName.key: name,
+            FlutterPerformanceSemantics.durationMs.key: duration.inMilliseconds,
             ...?attributes,
           }.toAttributes(),
     );
@@ -841,7 +976,7 @@ class FlutterOTel {
         .record(
           duration.inMilliseconds,
           <String, Object>{
-            'perf.metric.name': name,
+            FlutterPerformanceSemantics.metricName.key: name,
             ...?attributes,
           }.toAttributes(),
         );
@@ -859,19 +994,38 @@ class FlutterOTel {
     forceFlush();
   }
 
-  /// Sends all pending OTel data
+  /// Sends all pending OTel data (traces, metrics, and logs).
   static forceFlush() {
-    tracerProvider.forceFlush(); //TODO - await
-    meterProvider.forceFlush();
+    try {
+      tracerProvider.forceFlush();
+    } catch (e) {
+      // Guard against accessing after reset
+    }
+    try {
+      loggerProvider.forceFlush();
+    } catch (e) {
+      // Guard against accessing after reset
+    }
+    try {
+      meterProvider.forceFlush();
+    } catch (e) {
+      // Guard against accessing after reset
+    }
   }
 
   @visibleForTesting
-  static reset() {
+  static Future<void> reset() async {
+    _flushTimer?.cancel();
+    _flushTimer = null;
     // ignore: invalid_use_of_visible_for_testing_member
-    sdk.OTel.reset();
+    await sdk.OTel.reset();
     AutomaticUserInteractionTracker.shutdown();
     _sessionManager?.dispose();
     _sessionManager = null;
+    _enableAutoLogEvents = true;
+    _lifecycleObserver = null;
+    _routeObserver = null;
+    _interactionTracker = null;
     try {
       WidgetsBinding.instance.removeObserver(FlutterOTel.lifecycleObserver);
     } catch (e) {

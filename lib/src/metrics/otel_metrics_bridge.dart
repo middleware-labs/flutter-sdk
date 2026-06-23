@@ -93,8 +93,8 @@ class OTelMetricsBridge {
 
     final attributes =
         <String, Object>{
-          'route.name': name,
-          'route.action': action,
+          FlutterRouteMetricSemantics.routeName.key: name,
+          FlutterRouteMetricSemantics.routeAction.key: action,
         }.toAttributes();
 
     _getNavigationMeter()
@@ -112,7 +112,9 @@ class OTelMetricsBridge {
 
     // Add a lifecycle state attribute
     final attributes =
-        <String, Object>{'lifecycle.state': state}.toAttributes();
+        <String, Object>{
+          FlutterLifecycleMetricSemantics.lifecycleState.key: state,
+        }.toAttributes();
 
     // Record the state change timestamp
     final now = DateTime.now().millisecondsSinceEpoch;

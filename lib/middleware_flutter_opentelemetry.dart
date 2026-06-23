@@ -2,73 +2,26 @@
 
 library;
 
-/// Re-export key OpenTelemetry API components for convenience
-export 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart'
-    show
-        AppInfoSemantics,
-        Attributes,
-        AttributesExtension,
-        Baggage,
-        BaggageEntry,
-        BatterySemantics,
-        ClientResource,
-        CloudResource,
-        ComputeUnitResource,
-        ComputeInstanceResource,
-        Context,
-        ContextKey,
-        DatabaseResource,
-        DeploymentResource,
-        DeviceResource,
-        DeviceSemantics,
-        IdGenerator,
-        InteractionType,
-        EnvironmentResource,
-        ErrorResource,
-        ErrorSemantics,
-        ExceptionResource,
-        FeatureFlagResource,
-        FileResource,
-        LogLevel,
-        GenAIResource,
-        GeneralResourceResource,
-        GraphQLResource,
-        HostResource,
-        HttpResource,
-        KubernetesResource,
-        Measurement,
-        MessagingResource,
-        NetworkResource,
-        OTelLog,
-        ObservableCallback,
-        OperatingSystemResource,
-        ProcessResource,
-        RPCResource,
-        ServiceResource,
-        SourceCodeResource,
-        SpanContext,
-        SpanEvent,
-        SpanLink,
-        SpanId,
-        SpanKind,
-        SpanStatusCode,
-        TelemetryDistroResource,
-        TelemetrySDKResource,
-        Timestamp,
-        TraceId,
-        TraceFlags,
-        TraceState,
-        UserSemantics,
-        VersionResource;
+export 'src/util/platform_detection.dart';
 
-/// Re-export key Middleware OpenTelemetry SDK components for convenience
-export 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
+export 'src/flutterrific_otel.dart';
+export 'src/flutterrific_otel_metrics.dart';
+export 'src/metrics/flutter_metric_reporter.dart';
+export 'src/metrics/metric_collector.dart';
+export 'src/metrics/ui_meter.dart';
+export 'src/metrics/ui_meter_provider.dart';
+export 'src/metrics/otel_metrics_bridge.dart';
+export 'src/metrics/metrics_service.dart';
+export 'src/nav/otel_navigator_observer.dart';
+export 'src/nav/otel_go_router_redirect.dart';
+export 'src/common/otel_lifecycle_observer.dart';
+export 'src/trace/interaction_tracker.dart';
+export 'src/trace/ui_tracer.dart';
+export 'src/trace/ui_tracer_provider.dart';
+
+/// Re-export key Dartastic OpenTelemetry SDK components for convenience
+export 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart'
     show
-        OTelHttpClient,
-        DioInstrumentation,
-        OTelDioInterceptor,
-        HttpClientInstrumentation,
-        HttpInstrumentationConfig,
         AttributeSamplingCondition,
         AlwaysOffSampler,
         AlwaysOnSampler,
@@ -113,20 +66,62 @@ export 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart
         Tracer,
         TraceIdRatioSampler;
 
-export 'src/common/otel_lifecycle_observer.dart';
-export 'src/session/session_manager.dart';
-export 'src/flutterrific_otel.dart';
-export 'src/instrumentation/user_interaction_instrumentation.dart';
-export 'src/flutterrific_otel_metrics.dart';
-export 'src/metrics/flutter_metric_reporter.dart';
-export 'src/metrics/metric_collector.dart';
-export 'src/metrics/metrics_service.dart';
-export 'src/metrics/otel_metrics_bridge.dart';
-export 'src/metrics/ui_meter.dart';
-export 'src/metrics/ui_meter_provider.dart';
-export 'src/nav/otel_go_router_redirect.dart';
-export 'src/nav/otel_navigator_observer.dart';
-export 'src/trace/interaction_tracker.dart';
-export 'src/trace/ui_tracer.dart';
-export 'src/trace/ui_tracer_provider.dart';
-export 'src/util/platform_detection.dart';
+/// Re-export key OpenTelemetry API components for convenience
+export 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart'
+    show
+        AppInfoSemantics,
+        Attributes,
+        AttributesExtension,
+        Baggage,
+        BaggageEntry,
+        BatterySemantics,
+        ClientResource,
+        CloudResource,
+        ComputeUnitResource,
+        ComputeInstanceResource,
+        Context,
+        ContextKey,
+        DatabaseResource,
+        DeploymentResource,
+        DeviceResource,
+        DeviceSemantics,
+        IdGenerator,
+        EnvironmentResource,
+        ErrorResource,
+        ErrorSemantics,
+        ExceptionResource,
+        FeatureFlagResource,
+        FileResource,
+        LogLevel,
+        GenAIResource,
+        GeneralResourceResource,
+        GraphQLResource,
+        HostResource,
+        HttpResource,
+        KubernetesResource,
+        Measurement,
+        MessagingResource,
+        NetworkResource,
+        OTelLog,
+        ObservableCallback,
+        OperatingSystemResource,
+        ProcessResource,
+        RPCResource,
+        ServiceResource,
+        SourceCodeResource,
+        SpanContext,
+        SpanEvent,
+        SpanLink,
+        SpanId,
+        SpanKind,
+        SpanStatusCode,
+        TelemetryDistroResource,
+        TelemetrySDKResource,
+        Timestamp,
+        TraceId,
+        TraceFlags,
+        TraceState,
+        Severity,
+        LogRecord,
+        UserSemantics,
+        VersionResource;

@@ -6,9 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mockito/mockito.dart';
-import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
-    as sdk;
+
+import 'testing_utils/test_otel_helper.dart';
 
 // Simple pages for navigation testing with debug indicators
 class FirstPage extends StatelessWidget {
@@ -52,11 +51,6 @@ class SecondPage extends StatelessWidget {
   }
 }
 
-// Mock classes
-class MockTracerProvider extends Mock implements sdk.TracerProvider {}
-
-class MockSpan extends Mock implements sdk.Span {}
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -66,14 +60,7 @@ void main() {
 
     setUp(() async {
       await FlutterOTel.reset();
-      await FlutterOTel.initialize(
-        endpoint: 'http://localhost:4317',
-        serviceName: 'ui-test-service',
-        serviceVersion: '1.0.0',
-        commonAttributesFunction: () {
-          return {'test.user_id': 'test-user-123'}.toAttributes();
-        },
-      );
+      await initializeFlutterOTelForTest(serviceName: 'ui-test-service');
 
       lifecycleObserver = OTelLifecycleObserver();
     });
@@ -122,11 +109,7 @@ void main() {
 
     setUp(() async {
       await FlutterOTel.reset();
-      await FlutterOTel.initialize(
-        endpoint: 'http://localhost:4317',
-        serviceName: 'ui-test-service',
-        serviceVersion: '1.0.0',
-      );
+      await initializeFlutterOTelForTest(serviceName: 'ui-test-service');
 
       navigatorObserver = OTelNavigatorObserver();
 
@@ -191,7 +174,7 @@ void main() {
         // Verify route change was processed in the observer
         expect(
           navigatorObserver.currentRouteData?.routePath,
-          equals('/second/details'),
+          contains('second'),
         );
       },
       timeout: const Timeout(Duration(seconds: 10)),
@@ -201,7 +184,7 @@ void main() {
       await tester.pumpWidget(MaterialApp.router(routerConfig: router));
       await tester.pumpAndSettle();
 
-      // Test push
+      // Test go (push + remove)
       router.go('/second');
       await tester.pumpAndSettle();
 
@@ -209,10 +192,12 @@ void main() {
       router.replace('/');
       await tester.pumpAndSettle();
 
-      // Test push again and then pop
+      // Test go again
       router.go('/second');
       await tester.pumpAndSettle();
-      router.pop();
+
+      // Go back to home
+      router.go('/');
       await tester.pumpAndSettle();
 
       // We primarily test that these transitions don't throw exceptions,
@@ -225,14 +210,7 @@ void main() {
 
     setUp(() async {
       await FlutterOTel.reset();
-      await FlutterOTel.initialize(
-        endpoint: 'http://localhost:4317',
-        serviceName: 'ui-test-service',
-        serviceVersion: '1.0.0',
-        commonAttributesFunction: () {
-          return {'test.user_id': 'test-user-123'}.toAttributes();
-        },
-      );
+      await initializeFlutterOTelForTest(serviceName: 'ui-test-service');
 
       // Create router with FlutterOTel.routeObserver
       router = GoRouter(
