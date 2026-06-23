@@ -4,6 +4,7 @@ import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 
 import '../flutterrific_otel.dart';
+import '../semantics/flutter_semantics.dart';
 import 'flutter_metric_reporter.dart';
 import 'ui_meter.dart';
 

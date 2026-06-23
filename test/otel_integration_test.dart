@@ -4,7 +4,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:middleware_flutter_opentelemetry/src/flutterrific_otel.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
+import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 import 'package:go_router/go_router.dart';
 
 import 'testing_utils/test_otel_helper.dart';

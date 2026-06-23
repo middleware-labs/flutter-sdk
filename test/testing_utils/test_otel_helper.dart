@@ -8,7 +8,8 @@
 // with the fake async zone. This helper uses ConsoleExporter with a
 // simple span processor that has no timers.
 
-import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
+import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 
 /// Initializes FlutterOTel for widget tests without gRPC connections or timers.
 ///

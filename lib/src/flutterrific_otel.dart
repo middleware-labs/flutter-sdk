@@ -2,7 +2,6 @@
 
 import 'dart:async';
 
-import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
@@ -11,20 +10,9 @@ import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart
 import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 import 'package:middleware_flutter_opentelemetry/src/factory/otel_flutter_factory.dart';
 import 'package:middleware_flutter_opentelemetry/src/recording/session_recording.dart';
-import 'package:middleware_flutter_opentelemetry/src/common/otel_lifecycle_observer.dart';
-import 'package:middleware_flutter_opentelemetry/src/factory/otel_flutter_factory.dart';
 import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger.dart';
 import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger_provider.dart';
-import 'package:middleware_flutter_opentelemetry/src/metrics/otel_metrics_bridge.dart';
-import 'package:middleware_flutter_opentelemetry/src/metrics/ui_meter.dart';
-import 'package:middleware_flutter_opentelemetry/src/metrics/ui_meter_provider.dart';
-import 'package:middleware_flutter_opentelemetry/src/nav/otel_navigator_observer.dart';
 import 'package:middleware_flutter_opentelemetry/src/semantics/flutter_semantics.dart';
-import 'package:middleware_flutter_opentelemetry/src/trace/interaction_tracker.dart';
-import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer.dart';
-import 'package:middleware_flutter_opentelemetry/src/trace/ui_tracer_provider.dart';
-import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
-import 'package:uuid/uuid.dart';
 
 typedef CommonAttributesFunction = Attributes Function();
 
@@ -524,7 +512,7 @@ class FlutterOTel {
     );
 
     // Create platform-specific log exporters if logs enabled and not provided
-    if (enableLogs && logRecordExporter == null && logRecordProcessor == null) {
+    if (enableLogs && logRecordExporter == null && logRecordProcessor == null && middlewareAccountKey != null && middlewareAccountKey.isNotEmpty) {
       if (kIsWeb) {
         if (OTelLog.isDebug()) {
           OTelLog.debug('Creating HTTP log exporter for web platform');
@@ -533,6 +521,12 @@ class FlutterOTel {
           OtlpHttpLogRecordExporterConfig(
             endpoint: endpoint,
             compression: false,
+            headers: {
+              "Authorization": middlewareAccountKey,
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Origin": "sdk.middleware.io",
+            },
           ),
         );
       } else {
@@ -543,6 +537,12 @@ class FlutterOTel {
           OtlpGrpcLogRecordExporterConfig(
             endpoint: endpoint,
             insecure: !secure,
+            headers: {
+              "Authorization": middlewareAccountKey,
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Origin": "sdk.middleware.io",
+            },
           ),
         );
       }
@@ -575,8 +575,6 @@ class FlutterOTel {
       logRecordProcessor: logRecordProcessor,
       logPrint: logPrint,
       logPrintLoggerName: logPrintLoggerName,
-      dartasticApiKey: dartasticApiKey,
-      tenantId: tenantId,
       detectPlatformResources: detectPlatformResources,
       oTelFactoryCreationFunction: otelFlutterFactoryFactoryFunction,
     );
@@ -729,7 +727,7 @@ class FlutterOTel {
   /// logger.emitEvent('user.action', body: 'Button tapped');
   /// ```
   static UILogger logger([String? name]) =>
-      loggerProvider.getLogger(name ?? sdk.OTel.defaultTracerName);
+      loggerProvider.getLogger(name ?? sdk.OTel.defaultTracerName) as UILogger;
 
   /// Get a Meter with the given name and version
   static UIMeter meter({
@@ -778,7 +776,7 @@ class FlutterOTel {
       kind: SpanKind.client,
       attributes:
           {
-            SessionViewSemantics.viewName.key: screenName,
+            RumSessionView.viewName.key: screenName,
             FlutterUISemantics.uiType.key: 'screen',
           }.toAttributes(),
     );
@@ -811,7 +809,7 @@ class FlutterOTel {
 
     // Create interaction attributes
     final interactionAttributes = <String, Object>{
-      SessionViewSemantics.viewName.key: screenName,
+      RumSessionView.viewName.key: screenName,
       InteractionSemantics.interactionType.key: interactionType,
       if (targetName != null)
         InteractionSemantics.interactionTarget.key: targetName,

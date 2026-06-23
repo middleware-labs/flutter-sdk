@@ -1,7 +1,7 @@
 // Licensed under the Apache License, Version 2.0
 // Copyright 2025, Michael Bushe, All rights reserved.
 
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 
 import 'ui_logger.dart';
 
@@ -26,7 +26,7 @@ part 'ui_logger_provider_create.dart';
 /// ```
 class UILoggerProvider implements LoggerProvider {
   final LoggerProvider _delegate;
-  final Map<String, UILogger> _loggers = {};
+  final Map<String, OTelLogger> _loggers = {};
 
   UILoggerProvider._({required LoggerProvider delegate}) : _delegate = delegate;
 
@@ -35,7 +35,7 @@ class UILoggerProvider implements LoggerProvider {
   /// Loggers are cached by `name:version` key so that repeated calls
   /// with the same parameters return the same instance.
   @override
-  UILogger getLogger(
+  OTelLogger getLogger(
     String name, {
     String? version,
     String? schemaUrl,
@@ -48,14 +48,16 @@ class UILoggerProvider implements LoggerProvider {
     final key = '$name:${version ?? ''}';
     return _loggers.putIfAbsent(
       key,
-      () => UILoggerCreate.create(
-        delegate: _delegate.getLogger(
-          name,
-          version: version,
-          schemaUrl: schemaUrl,
-          attributes: attributes,
-        ),
-      ),
+      () =>
+          UILoggerCreate.create(
+            delegate: _delegate.getLogger(
+              name,
+              version: version,
+              schemaUrl: schemaUrl,
+              attributes: attributes,
+            ),
+          )
+          as OTelLogger,
     );
   }
 

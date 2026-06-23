@@ -60,6 +60,9 @@ class UITracer implements sdk.Tracer {
   @override
   sdk.Resource? get resource => _provider.resource;
 
+  @override
+  TimeProvider get timeProvider => _delegate.timeProvider;
+
   UISpan createUISpan({
     required String name,
     UISpanType? uiSpanType,
@@ -413,31 +416,33 @@ class UITracer implements sdk.Tracer {
   @override
   api.APISpan? get currentSpan => _delegate.currentSpan;
 
-  @override
+  /// Convenience wrapper around [startActiveSpan] for callers that don't need
+  /// the span handle. Removed from the upstream `Tracer` API in beta.7 but
+  /// kept here for backward compatibility.
   T recordSpan<T>({
     required String name,
     required T Function() fn,
     SpanKind kind = SpanKind.internal,
     Attributes? attributes,
   }) {
-    return _delegate.recordSpan(
+    return _delegate.startActiveSpan(
       name: name,
-      fn: fn,
+      fn: (_) => fn(),
       kind: kind,
       attributes: attributes,
     );
   }
 
-  @override
+  /// Async convenience wrapper around [startActiveSpanAsync].
   Future<T> recordSpanAsync<T>({
     required String name,
     required Future<T> Function() fn,
     SpanKind kind = SpanKind.internal,
     Attributes? attributes,
   }) {
-    return _delegate.recordSpanAsync(
+    return _delegate.startActiveSpanAsync(
       name: name,
-      fn: fn,
+      fn: (_) => fn(),
       kind: kind,
       attributes: attributes,
     );
@@ -473,15 +478,17 @@ class UITracer implements sdk.Tracer {
     );
   }
 
-  @override
+  /// Starts a span parented to [context] without making it active.
+  /// Removed from the upstream `Tracer` API in beta.7; implemented via
+  /// [startSpan] for backward compatibility.
   api.APISpan startSpanWithContext({
     required String name,
     required Context context,
     SpanKind kind = SpanKind.internal,
     Attributes? attributes,
   }) {
-    return _delegate.startSpanWithContext(
-      name: name,
+    return startSpan(
+      name,
       context: context,
       kind: kind,
       attributes: attributes,

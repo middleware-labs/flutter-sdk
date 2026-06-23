@@ -11,8 +11,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  middleware_dart_opentelemetry: ^1.0.5
-  dartastic_opentelemetry_api: ^0.8.8
+  middleware_dart_opentelemetry: ^1.0.6
+  dartastic_opentelemetry_api: ^1.0.0-beta.7
   http: ^1.6.0
   #TODO - need to manage go_router dependency versions and no-go-router implementation
   go_router: ^14.8.1

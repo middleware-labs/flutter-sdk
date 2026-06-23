@@ -3,7 +3,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
+import 'package:middleware_flutter_opentelemetry/src/flutterrific_otel.dart';
+import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger.dart';
+import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger_provider.dart';
 
 import 'testing_utils/memory_log_record_exporter.dart';
 import 'testing_utils/test_otel_helper.dart';

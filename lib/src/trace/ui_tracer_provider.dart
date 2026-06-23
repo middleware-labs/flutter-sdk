@@ -90,6 +90,12 @@ class UITracerProvider implements TracerProvider {
   set sampler(Sampler? value) => _delegate.sampler = value;
 
   @override
+  TimeProvider get timeProvider => _delegate.timeProvider;
+
+  @override
+  set timeProvider(TimeProvider value) => _delegate.timeProvider = value;
+
+  @override
   bool get isShutdown => _delegate.isShutdown;
 
   @override

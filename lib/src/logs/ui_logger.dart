@@ -1,13 +1,14 @@
 // Licensed under the Apache License, Version 2.0
 // Copyright 2025, Michael Bushe, All rights reserved.
 
-import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart';
+
 import 'package:flutter/foundation.dart';
-import 'package:flutterrific_opentelemetry/src/semantics/flutter_semantics.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
+import '../semantics/flutter_semantics.dart';
 
 part 'ui_logger_create.dart';
 
-/// UILogger wraps the SDK [Logger] to provide Flutter-specific convenience
+/// UILogger wraps the SDK [OTelLogger] to provide Flutter-specific convenience
 /// methods for emitting structured log events in Flutter applications.
 ///
 /// In addition to the standard OTel Logger methods (emit, trace, debug, info,
@@ -29,10 +30,10 @@ part 'ui_logger_create.dart';
 /// logger.emitEvent('user.action', body: 'Button tapped',
 ///   attributes: {'button.id': 'submit'}.toAttributes());
 /// ```
-class UILogger implements Logger {
-  final Logger _delegate;
+class UILogger implements OTelLogger {
+  final OTelLogger _delegate;
 
-  UILogger._({required Logger delegate}) : _delegate = delegate;
+  UILogger._({required OTelLogger delegate}) : _delegate = delegate;
 
   // -- Delegate standard Logger interface --
 
