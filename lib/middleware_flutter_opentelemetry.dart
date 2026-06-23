@@ -130,3 +130,7 @@ export 'src/trace/interaction_tracker.dart';
 export 'src/trace/ui_tracer.dart';
 export 'src/trace/ui_tracer_provider.dart';
 export 'src/util/platform_detection.dart';
+// Session-replay configuration. Only the public config types are exported;
+// the internal capture/upload machinery stays private to the package.
+export 'src/recording/session_recording.dart'
+    show RecordingOptions, ScreenshotRecordingWrapper;

@@ -128,6 +128,40 @@ class MyAppState extends State<MyApp> {
 }
 ```
 
+#### Recording Quality
+
+Control the session replay frame quality with `RecordingOptions`, passed to
+`FlutterOTel.initialize`. The defaults are tuned for low bandwidth; raise
+`qualityValue` (and optionally `minShortSidePx`) for a sharper replay.
+
+```dart
+import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
+
+FlutterOTel.initialize(
+  serviceName: 'my-flutter-app',
+  tracerName: 'main',
+  middlewareAccountKey: '*****',
+  endpoint: 'https://<account>.middleware.io',
+  // Medium quality preset (good balance of clarity vs. bandwidth):
+  recordingOptions: const RecordingOptions(
+    qualityValue: 35,    // JPEG quality 1–100 (default 10). ~35 is medium.
+    minShortSidePx: 480, // Frame short-side resolution (default 320).
+  ),
+);
+```
+
+`RecordingOptions` knobs:
+
+| Option               | Default  | Description                                                        |
+|----------------------|----------|-------------------------------------------------------------------|
+| `qualityValue`       | `10`     | JPEG quality (1–100). Low ≈ 10, **medium ≈ 35**, high ≈ 60.        |
+| `minShortSidePx`     | `320`    | Frames are scaled so the short side is this many pixels.           |
+| `screenshotInterval` | `500 ms` | How often a frame is captured.                                    |
+| `archiveChunkSize`   | `10`     | Frames bundled per upload batch.                                  |
+
+> Tip: bandwidth grows quickly with quality. Avoid `qualityValue` above ~60
+> unless you also lower `minShortSidePx`.
+
 ## Platform Support
 
 | Platform | Support Level | Protocol  | Notes                                    |
