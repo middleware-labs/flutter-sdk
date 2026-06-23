@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 /// OpenTelemetry endpoint configuration for different platforms and environments
@@ -19,13 +18,13 @@ class OTelConfig {
       // Web builds run in browsers, MUST use HTTP endpoint (4318)
       // Browsers cannot use gRPC directly
       return 'http://localhost:4318';
-    } else if (!kIsWeb && Platform.isAndroid) {
+    } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       if (kDebugMode) {
         return androidEmulatorEndpoint;
       } else {
         return localEndpoint;
       }
-    } else if (!kIsWeb && Platform.isIOS) {
+    } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       if (kDebugMode) {
         // iOS Simulator can access localhost directly
         return localEndpoint;
@@ -120,13 +119,7 @@ class OTelConfig {
         print('Base Endpoint: $endpoint');
         print('Note: HTTP exporter will automatically append /v1/metrics');
       } else {
-        print(
-          'Platform: ${Platform.isAndroid
-              ? 'Android'
-              : Platform.isIOS
-              ? 'iOS'
-              : Platform.operatingSystem}',
-        );
+        print('Platform: ${defaultTargetPlatform.name}');
         print('Protocol: HTTP');
         print('Endpoint: $endpoint');
       }

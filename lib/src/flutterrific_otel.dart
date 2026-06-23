@@ -1,7 +1,6 @@
 // Licensed under the Apache License, Version 2.0
 
 import 'dart:async';
-import 'dart:io';
 
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import 'package:flutter/foundation.dart';
@@ -14,6 +13,29 @@ import 'package:middleware_flutter_opentelemetry/src/factory/otel_flutter_factor
 import 'package:middleware_flutter_opentelemetry/src/recording/session_recording.dart';
 
 typedef CommonAttributesFunction = Attributes Function();
+
+/// Web-safe operating-system name.
+///
+/// `dart:io`'s `Platform` is unavailable on Flutter web, so this derives the
+/// value from [kIsWeb] / [defaultTargetPlatform] (both from `flutter/foundation`)
+/// to mirror the strings returned by `Platform.operatingSystem`.
+String _operatingSystemName() {
+  if (kIsWeb) return 'web';
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.android:
+      return 'android';
+    case TargetPlatform.iOS:
+      return 'ios';
+    case TargetPlatform.macOS:
+      return 'macos';
+    case TargetPlatform.windows:
+      return 'windows';
+    case TargetPlatform.linux:
+      return 'linux';
+    case TargetPlatform.fuchsia:
+      return 'fuchsia';
+  }
+}
 
 /// A span processor that injects common attributes into every span.
 class CommonAttributeSpanProcessor implements SimpleSpanProcessor {
@@ -380,7 +402,7 @@ class FlutterOTel {
         'session.id': appLaunchId!,
         'session.start_time': sessionStartTime!,
         'mw.rum': 'true',
-        'os': kIsWeb ? 'web' : Platform.operatingSystem,
+        'os': _operatingSystemName(),
         'recording': _screenshotManager == null ? '0' : '1',
       }.toAttributes(),
     );
@@ -488,6 +510,12 @@ class FlutterOTel {
     //TODO - merge mobile/Flutter specific resources
     //sdk.OTel.defaultResource = sdk.OTel.defaultResourcemerge(flutterResources);
     //Create observers
+    // Tear down any observer from a previous initialize()/lazy access first so
+    // we never end up with multiple registered observers (which would emit
+    // duplicate lifecycle spans — e.g. several "AppStart"s — on every event).
+    if (_lifecycleObserver != null) {
+      WidgetsBinding.instance.removeObserver(_lifecycleObserver!);
+    }
     _lifecycleObserver = OTelLifecycleObserver();
     _routeObserver = OTelNavigatorObserver();
     _interactionTracker = OTelInteractionTracker();

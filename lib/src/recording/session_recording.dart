@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -9,10 +8,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:http/http.dart' as http;
-import 'package:image/image.dart' as image_pkg;
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
+
+import 'jpeg_encoder.dart' as jpeg;
+import 'recording_storage.dart';
 
 // ---------------------------------------------------------------------------
 // Bandwidth budget (rough numbers at default settings):
@@ -276,12 +276,12 @@ class MiddlewareScreenshotManager {
   /// (parity with Android single-thread `ioExecutor`).
   Future<void> _serializedIoTail = Future<void>.value();
 
-  /// Cached app-document directory — resolved once to avoid repeated async
-  /// platform-channel calls on every screenshot (getApplicationDocumentsDirectory
-  /// goes through a method channel which adds ~1–3 ms per call on some devices).
-  Directory? _appDocDir;
-  Directory? _screenshotDir;
-  Directory? _archiveDir;
+  /// Platform-specific persistence for screenshots and archives.
+  ///
+  /// Native builds use a filesystem-backed store (app documents directory);
+  /// web builds use an in-memory store since the browser has no such directory
+  /// and `dart:io` is unavailable. Resolved once in [start].
+  RecordingStorage? _storage;
 
   /// In-memory count of screenshots pending in the screenshot folder.
   /// Avoids a Directory.listSync() syscall after every single write.
@@ -313,14 +313,10 @@ class MiddlewareScreenshotManager {
     _pendingScreenshotCount = 0;
     _serializedIoTail = Future<void>.value();
 
-    // Resolve and cache the directory paths once — avoids repeated async
-    // platform-channel round-trips on every screenshot tick.
-    _appDocDir = await getApplicationDocumentsDirectory();
-    _screenshotDir = Directory('${_appDocDir!.path}/screenshots');
-    _archiveDir = Directory('${_appDocDir!.path}/archives');
-    for (final dir in [_screenshotDir!, _archiveDir!]) {
-      if (!await dir.exists()) await dir.create(recursive: true);
-    }
+    // Resolve the platform-appropriate storage once (filesystem on native,
+    // in-memory on web) and initialise its backing structures.
+    _storage = createRecordingStorage();
+    await _storage!.init();
 
     _networkManager = NetworkManager(builder.target, builder.rumAccessToken);
 
@@ -372,8 +368,9 @@ class MiddlewareScreenshotManager {
 
     _sanitizedElements.clear();
     _lastOrientation = null;
-    _screenshotDir = null;
-    _archiveDir = null;
+    _storage = null;
+    _maskPatternImage?.dispose();
+    _maskPatternImage = null;
     _networkManager?.dispose();
     _networkManager = null;
     _stopped = false;
@@ -416,8 +413,7 @@ class MiddlewareScreenshotManager {
 
   Future<void> _terminateFlush() async {
     try {
-      final screenshotFolder = await _getScreenshotFolder();
-      await _archiveFolder(screenshotFolder);
+      await _archiveScreenshots();
       await sendScreenshots();
     } catch (e) {
       if (kDebugMode) {
@@ -435,41 +431,35 @@ class MiddlewareScreenshotManager {
       if (kDebugMode) debugPrint('Stale file upload disabled by configuration');
       return;
     }
+    final storage = _storage;
+    if (storage == null) return;
     try {
       if (kDebugMode)
         debugPrint('Checking for stale files from previous sessions…');
 
-      final archiveFolder = await _getArchiveFolder();
-      if (await archiveFolder.exists()) {
-        final archives = archiveFolder.listSync().whereType<File>().toList();
-        if (archives.isNotEmpty) {
-          if (kDebugMode)
-            debugPrint('Found ${archives.length} stale archive(s)');
-          final ok = await _uploadStaleArchives(archives);
-          if (!ok) {
-            await _deleteOldArchives(
-              archives,
-              maxAge: builder.recordingOptions.staleArchiveMaxAge,
-            );
-          }
+      final archives = await storage.archiveNames();
+      if (archives.isNotEmpty) {
+        if (kDebugMode) debugPrint('Found ${archives.length} stale archive(s)');
+        final ok = await _uploadStaleArchives(archives);
+        if (!ok) {
+          await _deleteOldArchives(
+            archives,
+            maxAge: builder.recordingOptions.staleArchiveMaxAge,
+          );
         }
       }
 
-      final screenshotFolder = await _getScreenshotFolder();
-      if (await screenshotFolder.exists()) {
-        final screenshots =
-            screenshotFolder.listSync().whereType<File>().toList();
-        if (screenshots.isNotEmpty) {
-          if (kDebugMode)
-            debugPrint('Found ${screenshots.length} stale screenshot(s)');
-          if (screenshots.length >= builder.recordingOptions.archiveChunkSize) {
-            await _archiveFolder(screenshotFolder);
-          } else {
-            await _deleteOldScreenshots(
-              screenshots,
-              maxAge: builder.recordingOptions.staleScreenshotMaxAge,
-            );
-          }
+      final screenshots = await storage.screenshotNames();
+      if (screenshots.isNotEmpty) {
+        if (kDebugMode)
+          debugPrint('Found ${screenshots.length} stale screenshot(s)');
+        if (screenshots.length >= builder.recordingOptions.archiveChunkSize) {
+          await _archiveScreenshots();
+        } else {
+          await _deleteOldScreenshots(
+            screenshots,
+            maxAge: builder.recordingOptions.staleScreenshotMaxAge,
+          );
         }
       }
       if (kDebugMode) debugPrint('Stale file cleanup completed');
@@ -478,8 +468,10 @@ class MiddlewareScreenshotManager {
     }
   }
 
-  Future<bool> _uploadStaleArchives(List<File> archives) async {
+  Future<bool> _uploadStaleArchives(List<String> archives) async {
     if (sessionId.isEmpty) return false;
+    final storage = _storage;
+    if (storage == null) return false;
     // Stale upload runs during start() before _networkManager is assigned,
     // so create a short-lived client just for this one-time operation.
     final networkManager = NetworkManager(
@@ -489,10 +481,8 @@ class MiddlewareScreenshotManager {
     try {
       int successCount = 0;
 
-      for (final archive in archives) {
+      for (final fileName in archives) {
         try {
-          final fileName = archive.uri.pathSegments.last;
-
           // FIX #3 — Stale archives by definition come from *previous* sessions.
           // The old code skipped archives whose filename DID NOT start with
           // sessionId, which is the wrong predicate — stale archives will never
@@ -504,14 +494,16 @@ class MiddlewareScreenshotManager {
           // too old and the upload fails, fall through to age-based deletion.
           // The uploadSessionId extracted below ensures each batch is attributed
           // to the correct session on the backend.
-          final modified = await archive.lastModified();
-          if (DateTime.now().difference(modified) >
-              builder.recordingOptions.staleArchiveMaxAge) {
-            await _deleteFileSafely(archive);
+          final modified = await storage.archiveModified(fileName);
+          if (modified != null &&
+              DateTime.now().difference(modified) >
+                  builder.recordingOptions.staleArchiveMaxAge) {
+            await storage.deleteArchive(fileName);
             continue;
           }
 
-          final imageData = await archive.readAsBytes();
+          final imageData = await storage.readArchive(fileName);
+          if (imageData == null) continue;
           final completer = Completer<bool>();
           final staleSessionId = _sessionIdFromArchiveFileName(
             fileName,
@@ -524,7 +516,7 @@ class MiddlewareScreenshotManager {
             fileName,
             _NetworkCallbackImpl(
               onSuccessCallback: (r) async {
-                await _deleteFileSafely(archive);
+                await storage.deleteArchive(fileName);
                 successCount++;
                 completer.complete(true);
               },
@@ -557,14 +549,17 @@ class MiddlewareScreenshotManager {
   }
 
   Future<void> _deleteOldArchives(
-    List<File> archives, {
+    List<String> archives, {
     required Duration maxAge,
   }) async {
+    final storage = _storage;
+    if (storage == null) return;
     final now = DateTime.now();
     for (final archive in archives) {
       try {
-        if (now.difference(await archive.lastModified()) > maxAge) {
-          await _deleteFileSafely(archive);
+        final modified = await storage.archiveModified(archive);
+        if (modified != null && now.difference(modified) > maxAge) {
+          await storage.deleteArchive(archive);
         }
       } catch (e) {
         if (kDebugMode) debugPrint('Error checking archive age: $e');
@@ -573,14 +568,17 @@ class MiddlewareScreenshotManager {
   }
 
   Future<void> _deleteOldScreenshots(
-    List<File> screenshots, {
+    List<String> screenshots, {
     required Duration maxAge,
   }) async {
+    final storage = _storage;
+    if (storage == null) return;
     final now = DateTime.now();
     for (final screenshot in screenshots) {
       try {
-        if (now.difference(await screenshot.lastModified()) > maxAge) {
-          await _deleteFileSafely(screenshot);
+        final modified = await storage.screenshotModified(screenshot);
+        if (modified != null && now.difference(modified) > maxAge) {
+          await storage.deleteScreenshot(screenshot);
         }
       } catch (e) {
         if (kDebugMode) debugPrint('Error checking screenshot age: $e');
@@ -632,15 +630,15 @@ class MiddlewareScreenshotManager {
         if (_stopped) {
           return;
         }
-        final screenshotFolder = await _getScreenshotFolder();
+        final storage = _storage;
+        if (storage == null) return;
         final timestamp = DateTime.now().millisecondsSinceEpoch;
-        final screenshotFile = File('${screenshotFolder.path}/$timestamp.jpeg');
-        await screenshotFile.writeAsBytes(screenshotData);
+        await storage.writeScreenshot('$timestamp.jpeg', screenshotData);
         _pendingScreenshotCount++;
 
         if (_pendingScreenshotCount >=
             builder.recordingOptions.archiveChunkSize) {
-          await _archiveFolder(screenshotFolder);
+          await _archiveScreenshots();
           _pendingScreenshotCount = 0;
         }
       });
@@ -662,6 +660,15 @@ class MiddlewareScreenshotManager {
   ///
   /// Returns JPEG [Uint8List] or null when an error occurs.
   Future<Uint8List?> _captureScreenshot() async {
+    // ui.Image instances hold native/GPU-backed pixel buffers that are NOT
+    // reclaimed by ordinary Dart GC promptly — they must be disposed explicitly
+    // or they accumulate (a full-window capture every tick is large, especially
+    // on web). These are disposed exactly once in the finally block below; note
+    // that _scaleToShortSide / _applyMaskToScreenshot may return the *same*
+    // instance they were given (when they are no-ops), so we dedup by identity.
+    ui.Image? rawImage;
+    ui.Image? scaledImage;
+    ui.Image? maskedImage;
     try {
       var boundary = _repaintBoundaryFromKey();
       if (boundary == null) {
@@ -698,10 +705,9 @@ class MiddlewareScreenshotManager {
       // ------------------------------------------------------------------
       // 1. Capture at native resolution (pixelRatio 1.0 keeps it manageable)
       // ------------------------------------------------------------------
-      final rawImage = await boundary.toImage(pixelRatio: 1.0);
+      rawImage = await boundary.toImage(pixelRatio: 1.0);
 
       if (_stopped) {
-        rawImage.dispose();
         return null;
       }
 
@@ -716,7 +722,7 @@ class MiddlewareScreenshotManager {
       //    images than Android on portrait screens and inconsistent replay
       //    frame sizes across platforms.
       // ------------------------------------------------------------------
-      final scaledImage = await _scaleToShortSide(
+      scaledImage = await _scaleToShortSide(
         rawImage,
         builder.recordingOptions.minShortSidePx,
       );
@@ -727,7 +733,7 @@ class MiddlewareScreenshotManager {
       // ------------------------------------------------------------------
       final scaleX = scaledImage.width / rawImage.width;
       final scaleY = scaledImage.height / rawImage.height;
-      final maskedImage = await _applyMaskToScreenshot(
+      maskedImage = await _applyMaskToScreenshot(
         scaledImage,
         scaleX,
         scaleY,
@@ -738,7 +744,8 @@ class MiddlewareScreenshotManager {
       }
 
       // ------------------------------------------------------------------
-      // 4. Encode as lossy JPEG (off UI thread via compute)
+      // 4. Encode as lossy JPEG (off UI thread: background isolate on native,
+      //    browser-native canvas encoder on web).
       // ------------------------------------------------------------------
       if (kDebugMode) {
         debugPrint(
@@ -755,10 +762,11 @@ class MiddlewareScreenshotManager {
         return null;
       }
 
-      final jpegBytes = await _encodeJpeg(
-        maskedImage,
-        rgbaBytes,
-        builder.recordingOptions.qualityValue,
+      final jpegBytes = await jpeg.encodeJpeg(
+        rgba: rgbaBytes,
+        width: maskedImage.width,
+        height: maskedImage.height,
+        quality: builder.recordingOptions.qualityValue,
       );
 
       if (kDebugMode) {
@@ -773,6 +781,10 @@ class MiddlewareScreenshotManager {
     } catch (e) {
       debugPrint('Error capturing screenshot: $e');
       return null;
+    } finally {
+      for (final img in <ui.Image?>{rawImage, scaledImage, maskedImage}) {
+        img?.dispose();
+      }
     }
   }
 
@@ -821,29 +833,6 @@ class MiddlewareScreenshotManager {
       Paint()..filterQuality = FilterQuality.medium,
     );
     return recorder.endRecording().toImage(newW, newH);
-  }
-
-  /// Encode a [ui.Image] as JPEG at the given [quality] (1–100).
-  ///
-  /// Uses the `image` package (pub.dev/packages/image ≥ 4.0) via compute()
-  /// to keep the CPU-intensive encode off the UI thread.
-  ///
-  ///   dependencies:
-  ///     image: ^4.2.0
-  Future<Uint8List> _encodeJpeg(
-    ui.Image image,
-    Uint8List rgbaBytes,
-    int quality,
-  ) async {
-    return compute(
-      _encodeJpegIsolate,
-      _JpegEncodeParams(
-        rgba: rgbaBytes,
-        width: image.width,
-        height: image.height,
-        quality: quality,
-      ),
-    );
   }
 
   // -------------------------------------------------------------------------
@@ -972,75 +961,54 @@ class MiddlewareScreenshotManager {
   // File I/O
   // -------------------------------------------------------------------------
 
-  Future<Directory> _getScreenshotFolder() async {
-    if (_screenshotDir != null) return _screenshotDir!;
-    final appDir = await getApplicationDocumentsDirectory();
-    final dir = Directory('${appDir.path}/screenshots');
-    if (!await dir.exists()) await dir.create(recursive: true);
-    return dir;
-  }
-
-  Future<Directory> _getArchiveFolder() async {
-    if (_archiveDir != null) return _archiveDir!;
-    final appDir = await getApplicationDocumentsDirectory();
-    final dir = Directory('${appDir.path}/archives');
-    if (!await dir.exists()) await dir.create(recursive: true);
-    return dir;
-  }
-
-  Future<void> _archiveFolder(Directory folder) async {
+  /// Bundles all pending screenshots into a single `.tar.gz` archive stored via
+  /// [_storage], then removes the source screenshots. Works identically on
+  /// native (filesystem) and web (in-memory) since it operates purely through
+  /// the [RecordingStorage] abstraction.
+  Future<void> _archiveScreenshots() async {
+    final storage = _storage;
+    if (storage == null) return;
     try {
-      final entities = folder.listSync();
-      final screenshots = <File>[];
-      for (final e in entities) {
-        if (e is File) screenshots.add(e);
-      }
+      final screenshots = await storage.screenshotNames();
       if (screenshots.isEmpty) return;
 
-      // Sort by filename — filenames are millisecond timestamps so
-      // lexicographic order == chronological order; avoids N stat() syscalls.
-      screenshots.sort((a, b) {
-        final nameA = a.uri.pathSegments.last;
-        final nameB = b.uri.pathSegments.last;
-        return nameA.compareTo(nameB);
-      });
+      // Sort by name — names are millisecond timestamps so lexicographic order
+      // == chronological order.
+      screenshots.sort();
 
       // FIX #7 — Set lastTs once from the last (most-recent) file after sort,
       // matching Java's `lastTs = getNameWithoutExtension(screenshots[last])`.
       // Previously lastTs was overwritten in the loop body on every iteration;
       // the end result was identical but the intent was unclear.
-      _lastTs = _getNameWithoutExtension(screenshots.last);
+      _lastTs = _nameWithoutExtension(screenshots.last);
 
       final archive = Archive();
-      for (final screenshot in screenshots) {
-        final filename =
-            '${_firstTs}_1_${_getNameWithoutExtension(screenshot)}.jpeg';
-        // FIX #7 — Read file into Uint8List once. The archive library requires
+      final archived = <String>[];
+      for (final name in screenshots) {
+        // FIX #7 — Read the screenshot bytes once. The archive library requires
         // the full bytes for in-memory archiving; streaming is not exposed by
         // the `archive` package's Archive/ArchiveFile API.  The IO cost is
         // acceptable given the small frame sizes (< 30 KB each at default
         // quality settings).
-        final bytes = await screenshot.readAsBytes();
+        final bytes = await storage.readScreenshot(name);
+        if (bytes == null) continue;
+        final filename = '${_firstTs}_1_${_nameWithoutExtension(name)}.jpeg';
         archive.addFile(ArchiveFile(filename, bytes.length, bytes));
+        archived.add(name);
       }
+      if (archived.isEmpty) return;
 
       final tarEncoder = TarEncoder();
       final tarData = tarEncoder.encode(archive);
       final gzipData = GZipEncoder().encode(tarData);
-      if (gzipData == null) {
-        debugPrint('Error archiving folder: gzip encoding returned null');
-        return;
-      }
 
-      final archiveFolder = await _getArchiveFolder();
-      final archiveFile = File(
-        '${archiveFolder.path}/$sessionId-$_lastTs.tar.gz',
+      await storage.writeArchive(
+        '$sessionId-$_lastTs.tar.gz',
+        Uint8List.fromList(gzipData),
       );
 
-      await archiveFile.writeAsBytes(gzipData);
-
-      for (final screenshot in screenshots) {
-        await screenshot.delete();
+      for (final name in archived) {
+        await storage.deleteScreenshot(name);
       }
     } catch (e) {
       debugPrint('Error archiving folder: $e');
@@ -1063,14 +1031,11 @@ class MiddlewareScreenshotManager {
 
     final nm = _networkManager;
     if (nm == null) return;
+    final storage = _storage;
+    if (storage == null) return;
 
     try {
-      final archiveFolder = await _getArchiveFolder();
-      final entities = archiveFolder.listSync();
-      final archives = <File>[];
-      for (final e in entities) {
-        if (e is File) archives.add(e);
-      }
+      final archives = await storage.archiveNames();
 
       if (archives.isEmpty) {
         if (kDebugMode) debugPrint('No archives to upload');
@@ -1097,11 +1062,13 @@ class MiddlewareScreenshotManager {
     }
   }
 
-  /// Uploads a single [archive] and returns true on success.
-  Future<bool> _uploadArchive(NetworkManager nm, File archive) async {
+  /// Uploads a single archive (by [fileName]) and returns true on success.
+  Future<bool> _uploadArchive(NetworkManager nm, String fileName) async {
+    final storage = _storage;
+    if (storage == null) return false;
     try {
-      final imageData = await archive.readAsBytes();
-      final fileName = archive.uri.pathSegments.last;
+      final imageData = await storage.readArchive(fileName);
+      if (imageData == null) return false;
       final completer = Completer<bool>();
 
       final uploadSessionId = _sessionIdFromArchiveFileName(
@@ -1115,7 +1082,7 @@ class MiddlewareScreenshotManager {
         fileName,
         _NetworkCallbackImpl(
           onSuccessCallback: (response) async {
-            final deleted = await _deleteFileSafely(archive);
+            final deleted = await storage.deleteArchive(fileName);
             completer.complete(deleted);
           },
           onErrorCallback: (e) {
@@ -1128,24 +1095,6 @@ class MiddlewareScreenshotManager {
       return await completer.future;
     } catch (e) {
       if (kDebugMode) debugPrint('Error processing archive: $e');
-      return false;
-    }
-  }
-
-  Future<bool> _deleteFileSafely(File file) async {
-    try {
-      if (await file.exists()) {
-        await file.delete();
-        if (await file.exists()) {
-          if (kDebugMode)
-            debugPrint('File still exists after delete: ${file.path}');
-          return false;
-        }
-        return true;
-      }
-      return true; // already gone
-    } catch (e) {
-      if (kDebugMode) debugPrint('Error deleting file ${file.path}: $e');
       return false;
     }
   }
@@ -1168,45 +1117,10 @@ class MiddlewareScreenshotManager {
     }
   }
 
-  String _getNameWithoutExtension(File file) {
-    final name = file.uri.pathSegments.last;
+  String _nameWithoutExtension(String name) {
     final lastDot = name.lastIndexOf('.');
     return lastDot > 0 ? name.substring(0, lastDot) : name;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Isolate helpers for off-thread JPEG encoding
-// ---------------------------------------------------------------------------
-
-class _JpegEncodeParams {
-  final Uint8List rgba;
-  final int width;
-  final int height;
-  final int quality;
-
-  const _JpegEncodeParams({
-    required this.rgba,
-    required this.width,
-    required this.height,
-    required this.quality,
-  });
-}
-
-/// Top-level function (required for [compute]).
-///
-/// Uses the `image` package (pub.dev/packages/image ≥ 4.0).
-/// Add to pubspec.yaml:  image: ^4.2.0
-Uint8List _encodeJpegIsolate(_JpegEncodeParams p) {
-  // ignore: depend_on_referenced_packages
-  final img = image_pkg.Image.fromBytes(
-    width: p.width,
-    height: p.height,
-    bytes: p.rgba.buffer,
-    format: image_pkg.Format.uint8,
-    numChannels: 4,
-  );
-  return Uint8List.fromList(image_pkg.encodeJpg(img, quality: p.quality));
 }
 
 // ---------------------------------------------------------------------------
