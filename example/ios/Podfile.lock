@@ -2,10 +2,10 @@ PODS:
   - BitByteData (2.0.4)
   - DeviceKit (5.8.0)
   - Flutter (1.0.0)
-  - middleware_flutter_opentelemetry (1.1.0):
+  - middleware_flutter_opentelemetry (1.1.1):
     - Flutter
     - MiddlewareRum (~> 2.1)
-  - MiddlewareRum (2.1.0):
+  - MiddlewareRum (2.1.2):
     - DeviceKit (~> 5.4)
     - PLCrashReporter (~> 1.11)
     - Reachability (~> 3.7)
@@ -80,8 +80,8 @@ SPEC CHECKSUMS:
   BitByteData: 2422ed269fcddc44976d97f171a183d25ef535ce
   DeviceKit: 57636054c827d171a22baa3fd320b65a70f3fda7
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  middleware_flutter_opentelemetry: 31080ae1402776179a29c5fd5ee34ce5a0a050c9
-  MiddlewareRum: 4754b331682890e8af681be7da9c3760bb4b37c3
+  middleware_flutter_opentelemetry: 83e58fbd15bef297577351d11f26f491c6e72e75
+  MiddlewareRum: 7b3d0f135cb82380bb096b4817f43a51a2f7dbb1
   PLCrashReporter: db59ef96fa3d25f3650040d02ec2798cffee75f2
   Reachability: 8bf74b755b2993968c344b465c13e602db2b1044
   SWCompression: 9379873ad5e9f25b31db88c441649b59a4c2bab7
