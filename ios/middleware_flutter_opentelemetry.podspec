@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'middleware_flutter_opentelemetry'
-  s.version          = '1.1.0'
+  s.version          = '1.1.1'
   s.summary          = 'Middleware Flutter RUM native bridge'
   s.description      = <<-DESC
 Native bridge for the Middleware Flutter SDK: links the Dart-owned session and
