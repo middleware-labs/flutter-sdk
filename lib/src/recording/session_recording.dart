@@ -43,15 +43,19 @@ String _rumResourceAttributesJson() {
   try {
     return jsonEncode(resource.attributes.toJson());
   } catch (e, st) {
-    if (kDebugMode)
+    if (kDebugMode) {
       debugPrint('RUM resourceAttributes jsonEncode failed: $e\n$st');
+    }
     return '{}';
   }
 }
 
 /// Archive files are named `{sessionId}-{lastTs}.tar.gz` with a hyphen between
 /// the id and the timestamp (session id has no hyphens).
-String _sessionIdFromArchiveFileName(String fileName, String fallbackSessionId) {
+String _sessionIdFromArchiveFileName(
+  String fileName,
+  String fallbackSessionId,
+) {
   if (!fileName.endsWith('.tar.gz')) return fallbackSessionId;
   final base = fileName.substring(0, fileName.length - 7);
   final dash = base.indexOf('-');
@@ -68,6 +72,12 @@ abstract class NetworkCallback {
 
   void onError(Exception error);
 }
+
+/// Capture frequency of the NATIVE v3 recorder (Android/iOS).
+enum NativeRecordingFrequency { low, standard, high }
+
+/// Image quality of the NATIVE v3 recorder (Android/iOS).
+enum NativeRecordingQuality { low, standard, high }
 
 /// Recording options configuration
 class RecordingOptions {
@@ -99,6 +109,20 @@ class RecordingOptions {
   final Duration staleScreenshotMaxAge;
   final bool uploadStaleFilesOnStart;
 
+  /// NATIVE v3 recorder options (Android/iOS only). Null values use the
+  /// native SDK defaults. The fields above configure the pure-Dart recorder
+  /// (web / v3 opt-out) and do not affect the native recorder.
+  final NativeRecordingFrequency? frequency;
+  final NativeRecordingQuality? quality;
+
+  /// Mask all text in the NATIVE v3 recording. NOTE: has no effect on
+  /// Flutter widget content (the native mask collector sees one opaque
+  /// FlutterView); it only applies to native views layered in the app.
+  final bool? maskAllTextInputs;
+
+  /// Mask image content in the NATIVE v3 recording (native views only).
+  final bool? maskAllImages;
+
   const RecordingOptions({
     this.screenshotInterval = const Duration(milliseconds: 500),
     this.qualityValue = 10,
@@ -107,7 +131,22 @@ class RecordingOptions {
     this.staleArchiveMaxAge = const Duration(seconds: 59),
     this.staleScreenshotMaxAge = const Duration(seconds: 59),
     this.uploadStaleFilesOnStart = true,
+    this.frequency,
+    this.quality,
+    this.maskAllTextInputs,
+    this.maskAllImages,
   });
+
+  /// Shape sent over the native bridge; null when nothing is configured.
+  Map<String, Object?>? toNativeMap() {
+    final map = <String, Object?>{
+      if (frequency != null) 'frequency': frequency!.name,
+      if (quality != null) 'quality': quality!.name,
+      if (maskAllTextInputs != null) 'maskAllTextInputs': maskAllTextInputs,
+      if (maskAllImages != null) 'maskAllImages': maskAllImages,
+    };
+    return map.isEmpty ? null : map;
+  }
 }
 
 /// Middleware configuration builder
@@ -333,12 +372,11 @@ class MiddlewareScreenshotManager {
     // `scheduleWithFixedDelay(...intervalMillis, intervalMillis, ...)`.
     // Previously this was screenshotInterval × 3, which meant archives could
     // sit on disk for up to 3× the interval before being sent.
-    _uploadTimer = Timer.periodic(
-      builder.recordingOptions.screenshotInterval,
-      (_) {
-        unawaited(_enqueueSerializedIo(sendScreenshots));
-      },
-    );
+    _uploadTimer = Timer.periodic(builder.recordingOptions.screenshotInterval, (
+      _,
+    ) {
+      unawaited(_enqueueSerializedIo(sendScreenshots));
+    });
 
     unawaited(_screenshotTick());
     Timer(const Duration(seconds: 2), () {
@@ -434,8 +472,9 @@ class MiddlewareScreenshotManager {
     final storage = _storage;
     if (storage == null) return;
     try {
-      if (kDebugMode)
+      if (kDebugMode) {
         debugPrint('Checking for stale files from previous sessions…');
+      }
 
       final archives = await storage.archiveNames();
       if (archives.isNotEmpty) {
@@ -451,8 +490,9 @@ class MiddlewareScreenshotManager {
 
       final screenshots = await storage.screenshotNames();
       if (screenshots.isNotEmpty) {
-        if (kDebugMode)
+        if (kDebugMode) {
           debugPrint('Found ${screenshots.length} stale screenshot(s)');
+        }
         if (screenshots.length >= builder.recordingOptions.archiveChunkSize) {
           await _archiveScreenshots();
         } else {
@@ -521,8 +561,9 @@ class MiddlewareScreenshotManager {
                 completer.complete(true);
               },
               onErrorCallback: (e) {
-                if (kDebugMode)
+                if (kDebugMode) {
                   debugPrint('Failed to upload stale archive: $e');
+                }
                 completer.complete(false);
               },
             ),
@@ -530,8 +571,9 @@ class MiddlewareScreenshotManager {
           await completer.future.timeout(
             const Duration(seconds: 30),
             onTimeout: () {
-              if (kDebugMode)
+              if (kDebugMode) {
                 debugPrint('Timeout uploading stale archive: $fileName');
+              }
               return false;
             },
           );
@@ -733,11 +775,7 @@ class MiddlewareScreenshotManager {
       // ------------------------------------------------------------------
       final scaleX = scaledImage.width / rawImage.width;
       final scaleY = scaledImage.height / rawImage.height;
-      maskedImage = await _applyMaskToScreenshot(
-        scaledImage,
-        scaleX,
-        scaleY,
-      );
+      maskedImage = await _applyMaskToScreenshot(scaledImage, scaleX, scaleY);
 
       if (_stopped) {
         return null;
@@ -821,7 +859,7 @@ class MiddlewareScreenshotManager {
     }
 
     if (kDebugMode) {
-      debugPrint('Session replay: scaling ${w}×$h → ${newW}×$newH');
+      debugPrint('Session replay: scaling $w×$h → $newW×$newH');
     }
 
     final recorder = ui.PictureRecorder();
@@ -869,11 +907,7 @@ class MiddlewareScreenshotManager {
 
     const double step = 25.0;
     for (double i = -size.toDouble(); i < size * 2; i += step) {
-      canvas.drawLine(
-        Offset(i, -1),
-        Offset(i + size, size + 1),
-        stripePaint,
-      );
+      canvas.drawLine(Offset(i, -1), Offset(i + size, size + 1), stripePaint);
     }
 
     // Rotate 90° around centre and draw the same stripes (cross-hatch)
@@ -882,11 +916,7 @@ class MiddlewareScreenshotManager {
     canvas.rotate(90 * 3.141592653589793 / 180);
     canvas.translate(-size / 2.0, -size / 2.0);
     for (double i = -size.toDouble(); i < size * 2; i += step) {
-      canvas.drawLine(
-        Offset(i, -1),
-        Offset(i + size, size + 1),
-        stripePaint,
-      );
+      canvas.drawLine(Offset(i, -1), Offset(i + size, size + 1), stripePaint);
     }
     canvas.restore();
 
@@ -1086,8 +1116,7 @@ class MiddlewareScreenshotManager {
             completer.complete(deleted);
           },
           onErrorCallback: (e) {
-            if (kDebugMode)
-              debugPrint('Upload failed for $fileName: $e');
+            if (kDebugMode) debugPrint('Upload failed for $fileName: $e');
             completer.complete(false);
           },
         ),

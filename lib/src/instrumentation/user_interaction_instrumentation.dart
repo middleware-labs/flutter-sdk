@@ -54,10 +54,7 @@ class AutomaticUserInteractionTracker {
     _reportingEnabled = value;
   }
 
-  static void initialize({
-    double tapThreshold = 20,
-    bool debug = false,
-  }) {
+  static void initialize({double tapThreshold = 20, bool debug = false}) {
     if (_initialized) {
       return;
     }
@@ -161,10 +158,7 @@ class AutomaticUserInteractionTracker {
       final direction = _directionFromDisplacement(dx, dy);
       final type =
           state.isSwipeContext ? InteractionType.swipe : InteractionType.scroll;
-      _reportPan(
-        interactionType: type,
-        direction: direction,
-      );
+      _reportPan(interactionType: type, direction: direction);
     }
   }
 
@@ -184,19 +178,20 @@ class AutomaticUserInteractionTracker {
             state.isSwipeContext
                 ? InteractionType.swipe
                 : InteractionType.scroll;
-        _reportPan(
-          interactionType: type,
-          direction: direction,
-        );
+        _reportPan(interactionType: type, direction: direction);
       }
     }
   }
 
   UserInteractionPanDirection _directionFromDisplacement(double dx, double dy) {
     if (dy.abs() >= dx.abs()) {
-      return dy < 0 ? UserInteractionPanDirection.up : UserInteractionPanDirection.down;
+      return dy < 0
+          ? UserInteractionPanDirection.up
+          : UserInteractionPanDirection.down;
     }
-    return dx < 0 ? UserInteractionPanDirection.left : UserInteractionPanDirection.right;
+    return dx < 0
+        ? UserInteractionPanDirection.left
+        : UserInteractionPanDirection.right;
   }
 
   bool _isSwipeContext(Offset position) {
@@ -266,7 +261,9 @@ class AutomaticUserInteractionTracker {
           interactionType,
           targetName: 'Screen',
           attributes:
-              {InteractionType.gestureDirection.key: direction.value}.toAttributes(),
+              {
+                InteractionType.gestureDirection.key: direction.value,
+              }.toAttributes(),
         );
       }),
     );
@@ -347,7 +344,9 @@ class AutomaticUserInteractionTracker {
       }
 
       bestInteractive ??= genericFallback;
-      final deepest = bestInteractive ?? (allHitElements.isEmpty ? null : allHitElements.first);
+      final deepest =
+          bestInteractive ??
+          (allHitElements.isEmpty ? null : allHitElements.first);
 
       if (deepest == null) {
         return _WidgetInfo(targetElement: 'Screen', widgetClassName: 'Screen');
@@ -356,8 +355,7 @@ class AutomaticUserInteractionTracker {
       String? elementClassName;
       if (bestInteractive != null) {
         final raw = bestInteractive.widget.runtimeType.toString();
-        elementClassName =
-            raw.startsWith('_') ? raw.substring(1) : raw;
+        elementClassName = raw.startsWith('_') ? raw.substring(1) : raw;
       }
 
       String? textContent;
@@ -373,7 +371,9 @@ class AutomaticUserInteractionTracker {
           final widget = current.widget;
           if (textContent == null) {
             if (widget is Text) {
-              textContent = _nonEmpty(widget.data ?? widget.textSpan?.toPlainText());
+              textContent = _nonEmpty(
+                widget.data ?? widget.textSpan?.toPlainText(),
+              );
             } else if (widget is RichText) {
               textContent = _nonEmpty(widget.text.toPlainText());
             }
@@ -570,7 +570,9 @@ class AutomaticUserInteractionTracker {
               final widget = element.widget;
               final className = widget.runtimeType.toString();
               final cleanName =
-                  className.startsWith('_') ? className.substring(1) : className;
+                  className.startsWith('_')
+                      ? className.substring(1)
+                      : className;
               final isInteractive =
                   _isDetectingElement(className) ||
                   _isDetectingElement(cleanName) ||

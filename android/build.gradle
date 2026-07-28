@@ -1,0 +1,55 @@
+group = "io.middleware.flutter"
+version = "1.0"
+
+buildscript {
+    // android-sdk 3.0.2 ships Kotlin 2.x metadata; consumers need KGP >= 2.0.
+    ext.kotlin_version = "2.0.21"
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.7.0")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+android {
+    namespace = "io.middleware.flutter"
+    // android-sdk's androidx transitive graph requires compileSdk >= 35.
+    compileSdk = 35
+
+    defaultConfig {
+        minSdk = 24
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+dependencies {
+    // Stable Middleware native SDK: session linking, screen-name store,
+    // v3 session recording, crash/ANR/network/slow-render instrumentation.
+    implementation "io.github.middleware-labs:android-sdk:3.0.2"
+    // Compile-visible OTel types used by the bridge (Attributes/AttributeKey);
+    // runtime classes come transitively from android-sdk. Keep the version
+    // aligned with the SDK's opentelemetry-bom.
+    implementation platform("io.opentelemetry:opentelemetry-bom:1.48.0")
+    implementation "io.opentelemetry:opentelemetry-api"
+}

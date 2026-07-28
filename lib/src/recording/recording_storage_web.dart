@@ -103,7 +103,11 @@ class WebRecordingStorage implements RecordingStorage {
 
   /// Drops oldest entries until [map] is within [maxBytes]. Keeps at least the
   /// just-written entry even if it alone exceeds the cap.
-  void _evict(Map<String, _Entry> map, int maxBytes, {required bool isArchive}) {
+  void _evict(
+    Map<String, _Entry> map,
+    int maxBytes, {
+    required bool isArchive,
+  }) {
     var current = isArchive ? _archiveBytes : _screenshotBytes;
     var dropped = 0;
     while (current > maxBytes && map.length > 1) {

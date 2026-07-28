@@ -40,7 +40,7 @@ class SessionManager with WidgetsBindingObserver {
   SessionManager({
     this.sessionChangedCallback,
     this.sessionEndedCallback,
-    this.idleInterval = const Duration(minutes: 5),
+    this.idleInterval = const Duration(minutes: 15),
     this.maxSessionDuration = const Duration(hours: 4),
     this.registerWidgetsBindingObserver = true,
   }) {
@@ -57,7 +57,7 @@ class SessionManager with WidgetsBindingObserver {
   /// [checkIdleTime].
   void Function()? sessionEndedCallback;
 
-  /// No user activity for this long counts as idle (default five minutes).
+  /// No user activity for this long counts as idle (default fifteen minutes).
   final Duration idleInterval;
 
   /// Hard cap on session wall-clock age while active (default four hours).

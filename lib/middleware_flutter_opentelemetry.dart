@@ -24,8 +24,15 @@ export 'src/instrumentation/user_interaction_instrumentation.dart';
 // Session-replay configuration. Only the public config types are exported;
 // the internal capture/upload machinery stays private to the package.
 export 'src/recording/session_recording.dart'
-    show RecordingOptions, ScreenshotRecordingWrapper;
+    show
+        RecordingOptions,
+        ScreenshotRecordingWrapper,
+        NativeRecordingFrequency,
+        NativeRecordingQuality;
 
+// Bridge to the native Middleware SDKs (session linking, screen names,
+// v3 session recording, native crash test helpers).
+export 'src/native/native_bridge.dart' show MiddlewareNativeBridge;
 
 /// Re-export key Dartastic OpenTelemetry SDK components for convenience
 export 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
