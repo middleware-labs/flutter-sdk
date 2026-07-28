@@ -1,0 +1,92 @@
+PODS:
+  - BitByteData (2.0.4)
+  - DeviceKit (5.8.0)
+  - Flutter (1.0.0)
+  - middleware_flutter_opentelemetry (1.1.0):
+    - Flutter
+    - MiddlewareRum (~> 2.1)
+  - MiddlewareRum (2.1.0):
+    - DeviceKit (~> 5.4)
+    - PLCrashReporter (~> 1.11)
+    - Reachability (~> 3.7)
+    - SWCompression (~> 4.8)
+    - SwiftProtobuf (~> 1.27.0)
+  - PLCrashReporter (1.12.0)
+  - Reachability (3.7.7)
+  - SWCompression (4.8.6):
+    - BitByteData (~> 2.0)
+    - SWCompression/BZip2 (= 4.8.6)
+    - SWCompression/Deflate (= 4.8.6)
+    - SWCompression/GZip (= 4.8.6)
+    - SWCompression/LZ4 (= 4.8.6)
+    - SWCompression/LZMA (= 4.8.6)
+    - SWCompression/LZMA2 (= 4.8.6)
+    - SWCompression/SevenZip (= 4.8.6)
+    - SWCompression/TAR (= 4.8.6)
+    - SWCompression/XZ (= 4.8.6)
+    - SWCompression/ZIP (= 4.8.6)
+    - SWCompression/Zlib (= 4.8.6)
+  - SWCompression/BZip2 (4.8.6):
+    - BitByteData (~> 2.0)
+  - SWCompression/Deflate (4.8.6):
+    - BitByteData (~> 2.0)
+  - SWCompression/GZip (4.8.6):
+    - BitByteData (~> 2.0)
+    - SWCompression/Deflate
+  - SWCompression/LZ4 (4.8.6):
+    - BitByteData (~> 2.0)
+  - SWCompression/LZMA (4.8.6):
+    - BitByteData (~> 2.0)
+  - SWCompression/LZMA2 (4.8.6):
+    - BitByteData (~> 2.0)
+    - SWCompression/LZMA
+  - SWCompression/SevenZip (4.8.6):
+    - BitByteData (~> 2.0)
+    - SWCompression/LZMA2
+  - SWCompression/TAR (4.8.6):
+    - BitByteData (~> 2.0)
+  - SWCompression/XZ (4.8.6):
+    - BitByteData (~> 2.0)
+    - SWCompression/LZMA2
+  - SWCompression/ZIP (4.8.6):
+    - BitByteData (~> 2.0)
+    - SWCompression/Deflate
+  - SWCompression/Zlib (4.8.6):
+    - BitByteData (~> 2.0)
+    - SWCompression/Deflate
+  - SwiftProtobuf (1.27.1)
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - middleware_flutter_opentelemetry (from `.symlinks/plugins/middleware_flutter_opentelemetry/ios`)
+
+SPEC REPOS:
+  trunk:
+    - BitByteData
+    - DeviceKit
+    - MiddlewareRum
+    - PLCrashReporter
+    - Reachability
+    - SWCompression
+    - SwiftProtobuf
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  middleware_flutter_opentelemetry:
+    :path: ".symlinks/plugins/middleware_flutter_opentelemetry/ios"
+
+SPEC CHECKSUMS:
+  BitByteData: 2422ed269fcddc44976d97f171a183d25ef535ce
+  DeviceKit: 57636054c827d171a22baa3fd320b65a70f3fda7
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  middleware_flutter_opentelemetry: 31080ae1402776179a29c5fd5ee34ce5a0a050c9
+  MiddlewareRum: 4754b331682890e8af681be7da9c3760bb4b37c3
+  PLCrashReporter: db59ef96fa3d25f3650040d02ec2798cffee75f2
+  Reachability: 8bf74b755b2993968c344b465c13e602db2b1044
+  SWCompression: 9379873ad5e9f25b31db88c441649b59a4c2bab7
+  SwiftProtobuf: b109bd17979d7993a84da14b1e1fdd8b0ded934a
+
+PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+
+COCOAPODS: 1.17.0
