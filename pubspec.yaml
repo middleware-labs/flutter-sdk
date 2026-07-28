@@ -1,6 +1,6 @@
 name: middleware_flutter_opentelemetry
 description: "A Flutter package for OpenTelemetry based on middleware_dart_opentelemetry"
-version: 1.0.16
+version: 1.1.0
 homepage: https://middleware.io
 repository: https://github.com/middleware-labs/flutter-sdk.git
 
@@ -12,7 +12,10 @@ dependencies:
   flutter:
     sdk: flutter
   middleware_dart_opentelemetry: ^1.0.6
-  dartastic_opentelemetry_api: ^1.0.0-beta.7
+  # Pinned: 1.0.0-rc.1 removed the Flutter semantic enums
+  # (NavigationAction, AppLifecycleSemantics, InteractionType, ...) this SDK
+  # builds against.
+  dartastic_opentelemetry_api: 1.0.0-beta.7
   http: ^1.6.0
   #TODO - need to manage go_router dependency versions and no-go-router implementation
   go_router: ^14.8.1
@@ -29,3 +32,14 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   mockito: ^5.5.1
   build_runner: ^2.4.15
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: io.middleware.flutter
+        pluginClass: MiddlewareFlutterPlugin
+      ios:
+        pluginClass: MiddlewareFlutterPlugin
+      # No web entry: the MethodChannel is guarded Dart-side (kIsWeb +
+      # MissingPluginException latch); all pure-Dart paths keep working.

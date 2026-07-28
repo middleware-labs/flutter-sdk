@@ -42,6 +42,13 @@ class OTelNavigatorObserver extends NavigatorObserver {
       newRouteChangeType,
     );
     currentRouteData = newOTelRouteData;
+    // Drive the native screen-name store so native telemetry and the v3
+    // session recording carry the Dart route name. No-op on web / when the
+    // plugin is unavailable.
+    final screenName = currentRouteData?.routeName;
+    if (screenName != null && screenName.isNotEmpty) {
+      MiddlewareNativeBridge.setScreenName(screenName);
+    }
     if (currentRouteData?.routeName != null) {
       final startTime = DateTime.now();
       String type = "load";

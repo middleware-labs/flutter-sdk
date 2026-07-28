@@ -69,6 +69,12 @@ abstract class NetworkCallback {
   void onError(Exception error);
 }
 
+/// Capture frequency of the NATIVE v3 recorder (Android/iOS).
+enum NativeRecordingFrequency { low, standard, high }
+
+/// Image quality of the NATIVE v3 recorder (Android/iOS).
+enum NativeRecordingQuality { low, standard, high }
+
 /// Recording options configuration
 class RecordingOptions {
   /// How often a screenshot is attempted.  4 s is a good balance; use 6–8 s
@@ -99,6 +105,20 @@ class RecordingOptions {
   final Duration staleScreenshotMaxAge;
   final bool uploadStaleFilesOnStart;
 
+  /// NATIVE v3 recorder options (Android/iOS only). Null values use the
+  /// native SDK defaults. The fields above configure the pure-Dart recorder
+  /// (web / v3 opt-out) and do not affect the native recorder.
+  final NativeRecordingFrequency? frequency;
+  final NativeRecordingQuality? quality;
+
+  /// Mask all text in the NATIVE v3 recording. NOTE: has no effect on
+  /// Flutter widget content (the native mask collector sees one opaque
+  /// FlutterView); it only applies to native views layered in the app.
+  final bool? maskAllTextInputs;
+
+  /// Mask image content in the NATIVE v3 recording (native views only).
+  final bool? maskAllImages;
+
   const RecordingOptions({
     this.screenshotInterval = const Duration(milliseconds: 500),
     this.qualityValue = 10,
@@ -107,7 +127,22 @@ class RecordingOptions {
     this.staleArchiveMaxAge = const Duration(seconds: 59),
     this.staleScreenshotMaxAge = const Duration(seconds: 59),
     this.uploadStaleFilesOnStart = true,
+    this.frequency,
+    this.quality,
+    this.maskAllTextInputs,
+    this.maskAllImages,
   });
+
+  /// Shape sent over the native bridge; null when nothing is configured.
+  Map<String, Object?>? toNativeMap() {
+    final map = <String, Object?>{
+      if (frequency != null) 'frequency': frequency!.name,
+      if (quality != null) 'quality': quality!.name,
+      if (maskAllTextInputs != null) 'maskAllTextInputs': maskAllTextInputs,
+      if (maskAllImages != null) 'maskAllImages': maskAllImages,
+    };
+    return map.isEmpty ? null : map;
+  }
 }
 
 /// Middleware configuration builder

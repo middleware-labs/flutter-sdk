@@ -24,10 +24,12 @@ typedef CommonAttributesFunction = Attributes Function();
 String _operatingSystemName() {
   if (kIsWeb) return 'web';
   switch (defaultTargetPlatform) {
+    // Mobile values match the native SDKs' resource attributes so the
+    // bifrost `os` facet doesn't split per session.
     case TargetPlatform.android:
-      return 'android';
+      return 'Android';
     case TargetPlatform.iOS:
-      return 'ios';
+      return 'iOS';
     case TargetPlatform.macOS:
       return 'macos';
     case TargetPlatform.windows:
@@ -275,6 +277,17 @@ class FlutterOTel {
   static SessionManager? _sessionManager;
   static final GlobalKey _repaintBoundaryKey = GlobalKey();
 
+  /// True once the native Middleware SDK (android/ios) initialized; native
+  /// telemetry and the v3 session recording follow the Dart session from then.
+  static bool _nativeSdkActive = false;
+
+  /// Whether the native SDK bridge is active for this run.
+  static bool get isNativeSdkActive => _nativeSdkActive;
+
+  /// Drives session idle checks when the Dart recorder (whose capture tick
+  /// used to drive them) is not running.
+  static Timer? _idleCheckTimer;
+
   static MiddlewareScreenshotManager? get screenshotManager =>
       _screenshotManager;
 
@@ -293,7 +306,42 @@ class FlutterOTel {
       'session.id': sessionId,
       'session.start_time': sessionStartTime!,
     });
+    // Keep the RESOURCE current too: bifrost groups sessions by the resource
+    // session.id, so without this every post-rotation span would land in the
+    // first session.
+    _mergeProviderResourceAttributes(<String, Object>{
+      AppLifecycleSemantics.appLaunchId.key: sessionId,
+      'session.id': sessionId,
+      'session.start_time': sessionStartTime!,
+    });
     _screenshotManager?.updateSessionId(sessionId);
+    if (_nativeSdkActive) {
+      // fire-and-forget: native v3 replay + crash reports follow the new id
+      MiddlewareNativeBridge.setSessionId(sessionId, sessionStartTime!);
+    }
+  }
+
+  /// Merges attributes into the LIVE provider resources (tracer, meter,
+  /// logger). Spans/logs resolve their resource through the provider at
+  /// export time, so this is how post-init resource updates (session
+  /// rotation, native environment info) reach exported telemetry.
+  static void _mergeProviderResourceAttributes(Map<String, Object> attributes) {
+    if (attributes.isEmpty) return;
+    try {
+      final patch = sdk.OTel.resource(attributes.toAttributes());
+      final tracerProvider = sdk.OTel.tracerProvider();
+      tracerProvider.resource =
+          tracerProvider.resource?.merge(patch) ?? patch;
+      final meterProvider = sdk.OTel.meterProvider();
+      meterProvider.resource = meterProvider.resource?.merge(patch) ?? patch;
+      final loggerProvider = sdk.OTel.loggerProvider();
+      loggerProvider.resource =
+          loggerProvider.resource?.merge(patch) ?? patch;
+    } catch (e) {
+      if (OTelLog.isDebug()) {
+        OTelLog.debug('Failed to merge provider resource attributes: $e');
+      }
+    }
   }
 
   /// Notifies the session manager of UI activity (parity with native tap
@@ -326,8 +374,18 @@ class FlutterOTel {
     sdk.Sampler? sampler,
     SpanKind spanKind = SpanKind.client,
     String? middlewareAccountKey,
+    String? deploymentEnvironment,
     Duration? flushTracesInterval = const Duration(seconds: 30),
     bool detectPlatformResources = true,
+    // Session recording configuration. On Android/iOS the native SDKs run
+    // v3 session recording by default; the pure-Dart recorder is used on web
+    // (and on mobile when [disableSessionRecordingV3] is true).
+    bool enableSessionRecording = true,
+    bool disableSessionRecordingV3 = false,
+    double? sessionSamplingRatio,
+    // Installs FlutterError.onError + PlatformDispatcher.onError handlers
+    // that call reportError, chaining any previously-installed handlers.
+    bool autoCaptureErrors = false,
     // Metrics configuration
     MetricExporter? metricExporter,
     MetricReader? metricReader,
@@ -385,14 +443,32 @@ class FlutterOTel {
     _sessionManager = SessionManager(
       sessionChangedCallback: _onRumSessionChanged,
       sessionEndedCallback: () {
+        // Flush all signals so old-session telemetry exports under the old
+        // resource before the session attributes are patched.
         sdk.OTel.tracerProvider().forceFlush();
+        try {
+          sdk.OTel.loggerProvider().forceFlush();
+          sdk.OTel.meterProvider().forceFlush();
+        } catch (_) {
+          // providers may not be initialized in all configurations
+        }
       },
     );
     final initialSession = _sessionManager!.sessionMetadata!;
     appLaunchId = initialSession.sessionId;
     sessionStartTime =
         (initialSession.sessionCreationDateEpoch * 1000).round();
-    if (middlewareAccountKey != null && middlewareAccountKey.isNotEmpty) {
+
+    final hasAccountKey =
+        middlewareAccountKey != null && middlewareAccountKey.isNotEmpty;
+    // Native v3 recording is the default on Android/iOS; the Dart recorder
+    // covers web and the explicit v3 opt-out.
+    final nativeV3Intended = MiddlewareNativeBridge.isSupported &&
+        hasAccountKey &&
+        enableSessionRecording &&
+        !disableSessionRecordingV3;
+
+    if (hasAccountKey && enableSessionRecording && !nativeV3Intended) {
       try {
         final builder = MiddlewareBuilder(
           target: endpoint,
@@ -418,6 +494,14 @@ class FlutterOTel {
         }
       }
     }
+    if (_screenshotManager == null) {
+      // The Dart recorder's capture tick normally drives session idle checks;
+      // keep them alive when the native recorder (or no recorder) runs.
+      _idleCheckTimer?.cancel();
+      _idleCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        _sessionManager?.checkIdleTime();
+      });
+    }
     resourceAttributes = resourceAttributes.copyWithAttributes(
       <String, Object>{
         AppLifecycleSemantics.appLaunchId.key: appLaunchId!,
@@ -425,7 +509,13 @@ class FlutterOTel {
         'session.start_time': sessionStartTime!,
         'mw.rum': 'true',
         'os': _operatingSystemName(),
-        'recording': _screenshotManager == null ? '0' : '1',
+        'recording': (enableSessionRecording &&
+                (nativeV3Intended || _screenshotManager != null))
+            ? '1'
+            : '0',
+        // Routes bifrost to the rrweb player; patched to '0' post-init if
+        // the native SDK turns out to be unavailable.
+        'recordingV3': nativeV3Intended ? '1' : '0',
       }.toAttributes(),
     );
 
@@ -511,46 +601,25 @@ class FlutterOTel {
       interval: Duration(seconds: 1), // Export every second
     );
 
-    // Create platform-specific log exporters if logs enabled and not provided
+    // Create log exporters if logs enabled and not provided. HTTP on every
+    // platform: the gRPC exporter defaults to port 4317 for https endpoints
+    // (no Middleware endpoint listens there), so native logs never arrived.
     if (enableLogs && logRecordExporter == null && logRecordProcessor == null && middlewareAccountKey != null && middlewareAccountKey.isNotEmpty) {
-      if (kIsWeb) {
-        if (OTelLog.isDebug()) {
-          OTelLog.debug('Creating HTTP log exporter for web platform');
-        }
-        logRecordExporter = OtlpHttpLogRecordExporter(
-          OtlpHttpLogRecordExporterConfig(
-            endpoint: endpoint,
-            compression: false,
-            headers: {
-              "Authorization": middlewareAccountKey,
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
-              "Origin": "sdk.middleware.io",
-            },
-          ),
-        );
-      } else {
-        if (OTelLog.isDebug()) {
-          OTelLog.debug('Creating gRPC log exporter for native platform');
-        }
-        logRecordExporter = OtlpGrpcLogRecordExporter(
-          OtlpGrpcLogRecordExporterConfig(
-            endpoint: endpoint,
-            insecure: !secure,
-            headers: {
-              "Authorization": middlewareAccountKey,
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
-              "Origin": "sdk.middleware.io",
-            },
-          ),
-        );
-      }
       if (OTelLog.isDebug()) {
-        OTelLog.debug(
-          'Created ${kIsWeb ? "HTTP" : "gRPC"} log record exporter',
-        );
+        OTelLog.debug('Creating HTTP log exporter');
       }
+      logRecordExporter = OtlpHttpLogRecordExporter(
+        OtlpHttpLogRecordExporterConfig(
+          endpoint: endpoint,
+          compression: false,
+          headers: {
+            "Authorization": middlewareAccountKey,
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Origin": "sdk.middleware.io",
+          },
+        ),
+      );
     }
 
     _enableAutoLogEvents = enableAutoLogEvents;
@@ -578,8 +647,52 @@ class FlutterOTel {
       detectPlatformResources: detectPlatformResources,
       oTelFactoryCreationFunction: otelFlutterFactoryFactoryFunction,
     );
-    //TODO - merge mobile/Flutter specific resources
-    //sdk.OTel.defaultResource = sdk.OTel.defaultResourcemerge(flutterResources);
+
+    // Initialize the native SDK (session-linked crash reporting + v3 session
+    // recording). Failures never break the pure-Dart pipeline.
+    _nativeSdkActive = false;
+    if (MiddlewareNativeBridge.isSupported && hasAccountKey) {
+      final nativeInfo = await MiddlewareNativeBridge.initNativeSdk(
+        target: endpoint,
+        accountKey: middlewareAccountKey,
+        serviceName: serviceName,
+        // must match the Dart resource so bifrost joins the sessions
+        projectName: serviceName,
+        // injected at build time so the native SDK never creates its own
+        // session (no phantom session, no session.id.change at startup)
+        sessionId: appLaunchId,
+        sessionStartTimeMs: sessionStartTime,
+        deploymentEnvironment: deploymentEnvironment,
+        sessionRecording: enableSessionRecording,
+        disableSessionRecordingV3: disableSessionRecordingV3,
+        sessionSamplingRatio: sessionSamplingRatio,
+        recordingOptions: recordingOptions.toNativeMap(),
+      );
+      _nativeSdkActive = nativeInfo != null;
+      if (_nativeSdkActive) {
+        // Re-push (idempotent) in case the session rotated during native init.
+        await MiddlewareNativeBridge.setSessionId(
+          appLaunchId!,
+          sessionStartTime!,
+        );
+        // Surface native environment info on the Dart resource too.
+        final appVersion = nativeInfo!['appVersion'] as String?;
+        final osVersion = nativeInfo['osVersion'] as String?;
+        final deviceModel = nativeInfo['deviceModel'] as String?;
+        _mergeProviderResourceAttributes(<String, Object>{
+          if (appVersion != null) 'app.version': appVersion,
+          if (osVersion != null) 'os.version': osVersion,
+          if (deviceModel != null) 'device.model.name': deviceModel,
+        });
+      } else if (nativeV3Intended) {
+        // Native SDK unavailable: correct the recordingV3 signal so bifrost
+        // doesn't route this session to the rrweb player.
+        _mergeProviderResourceAttributes(<String, Object>{
+          'recordingV3': '0',
+          'recording': _screenshotManager == null ? '0' : '1',
+        });
+      }
+    }
     //Create observers
     // Tear down any observer from a previous initialize()/lazy access first so
     // we never end up with multiple registered observers (which would emit
@@ -622,9 +735,47 @@ class FlutterOTel {
         debug: automaticUserInteractionDebug,
       );
     }
+
+    if (autoCaptureErrors) {
+      final previousFlutterHandler = FlutterError.onError;
+      FlutterError.onError = (details) {
+        try {
+          reportError(
+            'FlutterError.onError',
+            details.exception,
+            details.stack,
+            attributes: <String, dynamic>{
+              'error.library': details.library ?? 'unknown',
+            },
+          );
+        } catch (_) {
+          // never let error reporting break error handling
+        }
+        previousFlutterHandler?.call(details);
+      };
+      final previousPlatformHandler = PlatformDispatcher.instance.onError;
+      PlatformDispatcher.instance.onError = (error, stack) {
+        try {
+          reportError('PlatformDispatcher.onError', error, stack);
+        } catch (_) {
+          // never let error reporting break error handling
+        }
+        return previousPlatformHandler?.call(error, stack) ?? true;
+      };
+    }
   }
 
   static Future<void> startSessionRecording() async {
+    if (_nativeSdkActive && _screenshotManager == null) {
+      if (kDebugMode) {
+        debugPrint(
+          'v3 session recording is managed by the native SDK; '
+          'startSessionRecording is a no-op.',
+        );
+      }
+      _sessionManager?.hasRecording = true;
+      return;
+    }
     if (_screenshotManager == null) {
       if (kDebugMode) {
         debugPrint(
@@ -649,6 +800,15 @@ class FlutterOTel {
 
   /// Stop session recording
   static Future<void> stopSessionRecording() async {
+    if (_nativeSdkActive && _screenshotManager == null) {
+      if (kDebugMode) {
+        debugPrint(
+          'v3 session recording is managed by the native SDK and cannot be '
+          'stopped mid-session; use disableSessionRecordingV3 to opt out.',
+        );
+      }
+      return;
+    }
     if (_screenshotManager != null) {
       await _screenshotManager!.stop();
       _sessionManager?.hasRecording = false;
@@ -1015,6 +1175,8 @@ class FlutterOTel {
     }
     AutomaticUserInteractionTracker.shutdown();
     stopSessionRecording();
+    _idleCheckTimer?.cancel();
+    _idleCheckTimer = null;
     _sessionManager?.dispose();
     _sessionManager = null;
     forceFlush();
@@ -1043,6 +1205,9 @@ class FlutterOTel {
   static Future<void> reset() async {
     _flushTimer?.cancel();
     _flushTimer = null;
+    _idleCheckTimer?.cancel();
+    _idleCheckTimer = null;
+    _nativeSdkActive = false;
     // ignore: invalid_use_of_visible_for_testing_member
     await sdk.OTel.reset();
     AutomaticUserInteractionTracker.shutdown();
