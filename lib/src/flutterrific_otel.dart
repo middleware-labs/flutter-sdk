@@ -135,7 +135,6 @@ class FlutterOTel {
   /// the app is closed.
   static String? appLaunchId;
 
-
   /// Depicts session start time in milliseconds since epoch.
   static int? sessionStartTime;
 
@@ -330,13 +329,11 @@ class FlutterOTel {
     try {
       final patch = sdk.OTel.resource(attributes.toAttributes());
       final tracerProvider = sdk.OTel.tracerProvider();
-      tracerProvider.resource =
-          tracerProvider.resource?.merge(patch) ?? patch;
+      tracerProvider.resource = tracerProvider.resource?.merge(patch) ?? patch;
       final meterProvider = sdk.OTel.meterProvider();
       meterProvider.resource = meterProvider.resource?.merge(patch) ?? patch;
       final loggerProvider = sdk.OTel.loggerProvider();
-      loggerProvider.resource =
-          loggerProvider.resource?.merge(patch) ?? patch;
+      loggerProvider.resource = loggerProvider.resource?.merge(patch) ?? patch;
     } catch (e) {
       if (OTelLog.isDebug()) {
         OTelLog.debug('Failed to merge provider resource attributes: $e');
@@ -456,14 +453,14 @@ class FlutterOTel {
     );
     final initialSession = _sessionManager!.sessionMetadata!;
     appLaunchId = initialSession.sessionId;
-    sessionStartTime =
-        (initialSession.sessionCreationDateEpoch * 1000).round();
+    sessionStartTime = (initialSession.sessionCreationDateEpoch * 1000).round();
 
     final hasAccountKey =
         middlewareAccountKey != null && middlewareAccountKey.isNotEmpty;
     // Native v3 recording is the default on Android/iOS; the Dart recorder
     // covers web and the explicit v3 opt-out.
-    final nativeV3Intended = MiddlewareNativeBridge.isSupported &&
+    final nativeV3Intended =
+        MiddlewareNativeBridge.isSupported &&
         hasAccountKey &&
         enableSessionRecording &&
         !disableSessionRecordingV3;
@@ -509,10 +506,11 @@ class FlutterOTel {
         'session.start_time': sessionStartTime!,
         'mw.rum': 'true',
         'os': _operatingSystemName(),
-        'recording': (enableSessionRecording &&
-                (nativeV3Intended || _screenshotManager != null))
-            ? '1'
-            : '0',
+        'recording':
+            (enableSessionRecording &&
+                    (nativeV3Intended || _screenshotManager != null))
+                ? '1'
+                : '0',
         // Routes bifrost to the rrweb player; patched to '0' post-init if
         // the native SDK turns out to be unavailable.
         'recordingV3': nativeV3Intended ? '1' : '0',
@@ -604,7 +602,11 @@ class FlutterOTel {
     // Create log exporters if logs enabled and not provided. HTTP on every
     // platform: the gRPC exporter defaults to port 4317 for https endpoints
     // (no Middleware endpoint listens there), so native logs never arrived.
-    if (enableLogs && logRecordExporter == null && logRecordProcessor == null && middlewareAccountKey != null && middlewareAccountKey.isNotEmpty) {
+    if (enableLogs &&
+        logRecordExporter == null &&
+        logRecordProcessor == null &&
+        middlewareAccountKey != null &&
+        middlewareAccountKey.isNotEmpty) {
       if (OTelLog.isDebug()) {
         OTelLog.debug('Creating HTTP log exporter');
       }

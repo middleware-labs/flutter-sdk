@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 
 import 'testing_utils/test_otel_helper.dart';
+
 class MockLifecycleApp extends StatefulWidget {
   final Function(AppLifecycleState)? onStateChange;
 

@@ -15,8 +15,9 @@ import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart
 class MiddlewareNativeBridge {
   MiddlewareNativeBridge._();
 
-  static const MethodChannel channel =
-      MethodChannel('middleware_flutter_opentelemetry');
+  static const MethodChannel channel = MethodChannel(
+    'middleware_flutter_opentelemetry',
+  );
 
   /// True only on platforms where the plugin has a native implementation.
   static bool get isSupported =>

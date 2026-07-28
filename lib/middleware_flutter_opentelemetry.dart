@@ -34,7 +34,6 @@ export 'src/recording/session_recording.dart'
 // v3 session recording, native crash test helpers).
 export 'src/native/native_bridge.dart' show MiddlewareNativeBridge;
 
-
 /// Re-export key Dartastic OpenTelemetry SDK components for convenience
 export 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
     show

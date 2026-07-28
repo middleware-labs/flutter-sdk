@@ -51,7 +51,10 @@ String _rumResourceAttributesJson() {
 
 /// Archive files are named `{sessionId}-{lastTs}.tar.gz` with a hyphen between
 /// the id and the timestamp (session id has no hyphens).
-String _sessionIdFromArchiveFileName(String fileName, String fallbackSessionId) {
+String _sessionIdFromArchiveFileName(
+  String fileName,
+  String fallbackSessionId,
+) {
   if (!fileName.endsWith('.tar.gz')) return fallbackSessionId;
   final base = fileName.substring(0, fileName.length - 7);
   final dash = base.indexOf('-');
@@ -368,12 +371,11 @@ class MiddlewareScreenshotManager {
     // `scheduleWithFixedDelay(...intervalMillis, intervalMillis, ...)`.
     // Previously this was screenshotInterval × 3, which meant archives could
     // sit on disk for up to 3× the interval before being sent.
-    _uploadTimer = Timer.periodic(
-      builder.recordingOptions.screenshotInterval,
-      (_) {
-        unawaited(_enqueueSerializedIo(sendScreenshots));
-      },
-    );
+    _uploadTimer = Timer.periodic(builder.recordingOptions.screenshotInterval, (
+      _,
+    ) {
+      unawaited(_enqueueSerializedIo(sendScreenshots));
+    });
 
     unawaited(_screenshotTick());
     Timer(const Duration(seconds: 2), () {
@@ -768,11 +770,7 @@ class MiddlewareScreenshotManager {
       // ------------------------------------------------------------------
       final scaleX = scaledImage.width / rawImage.width;
       final scaleY = scaledImage.height / rawImage.height;
-      maskedImage = await _applyMaskToScreenshot(
-        scaledImage,
-        scaleX,
-        scaleY,
-      );
+      maskedImage = await _applyMaskToScreenshot(scaledImage, scaleX, scaleY);
 
       if (_stopped) {
         return null;
@@ -904,11 +902,7 @@ class MiddlewareScreenshotManager {
 
     const double step = 25.0;
     for (double i = -size.toDouble(); i < size * 2; i += step) {
-      canvas.drawLine(
-        Offset(i, -1),
-        Offset(i + size, size + 1),
-        stripePaint,
-      );
+      canvas.drawLine(Offset(i, -1), Offset(i + size, size + 1), stripePaint);
     }
 
     // Rotate 90° around centre and draw the same stripes (cross-hatch)
@@ -917,11 +911,7 @@ class MiddlewareScreenshotManager {
     canvas.rotate(90 * 3.141592653589793 / 180);
     canvas.translate(-size / 2.0, -size / 2.0);
     for (double i = -size.toDouble(); i < size * 2; i += step) {
-      canvas.drawLine(
-        Offset(i, -1),
-        Offset(i + size, size + 1),
-        stripePaint,
-      );
+      canvas.drawLine(Offset(i, -1), Offset(i + size, size + 1), stripePaint);
     }
     canvas.restore();
 
@@ -1121,8 +1111,7 @@ class MiddlewareScreenshotManager {
             completer.complete(deleted);
           },
           onErrorCallback: (e) {
-            if (kDebugMode)
-              debugPrint('Upload failed for $fileName: $e');
+            if (kDebugMode) debugPrint('Upload failed for $fileName: $e');
             completer.complete(false);
           },
         ),

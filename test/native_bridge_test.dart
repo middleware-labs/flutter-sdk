@@ -18,8 +18,9 @@ void main() {
   group('MiddlewareNativeBridge', () {
     test('initNativeSdk sends the full config payload', () async {
       MethodCall? received;
-      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel,
-          (call) async {
+      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel, (
+        call,
+      ) async {
         received = call;
         return <Object?, Object?>{
           'initialized': true,
@@ -51,14 +52,15 @@ void main() {
       expect(args['sessionRecording'], true);
       expect(args['disableSessionRecordingV3'], false);
       expect(args['sessionSamplingRatio'], 1.0);
-      expect(
-          (args['recordingOptions'] as Map)['frequency'], 'standard');
+      expect((args['recordingOptions'] as Map)['frequency'], 'standard');
       expect(info?['appVersion'], '1.2.3');
     });
 
     test('initNativeSdk returns null when native init fails', () async {
-      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel,
-          (call) async => <Object?, Object?>{'initialized': false});
+      messenger.setMockMethodCallHandler(
+        MiddlewareNativeBridge.channel,
+        (call) async => <Object?, Object?>{'initialized': false},
+      );
       final info = await MiddlewareNativeBridge.initNativeSdk(
         target: 't',
         accountKey: 'k',
@@ -70,14 +72,17 @@ void main() {
 
     test('setSessionId sends the id and start time as double ms', () async {
       MethodCall? received;
-      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel,
-          (call) async {
+      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel, (
+        call,
+      ) async {
         received = call;
         return null;
       });
 
       await MiddlewareNativeBridge.setSessionId(
-          'cafebabecafebabecafebabecafebabe', 1750000000000);
+        'cafebabecafebabecafebabecafebabe',
+        1750000000000,
+      );
 
       expect(received?.method, 'setSessionId');
       final args = received!.arguments as Map<Object?, Object?>;
@@ -87,8 +92,9 @@ void main() {
 
     test('setScreenName sends the route name', () async {
       MethodCall? received;
-      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel,
-          (call) async {
+      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel, (
+        call,
+      ) async {
         received = call;
         return null;
       });
@@ -100,8 +106,9 @@ void main() {
 
     test('MissingPluginException latches to no-op', () async {
       var calls = 0;
-      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel,
-          (call) async {
+      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel, (
+        call,
+      ) async {
         calls++;
         throw MissingPluginException();
       });
@@ -115,12 +122,12 @@ void main() {
     });
 
     test('PlatformException is swallowed', () async {
-      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel,
-          (call) async {
+      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel, (
+        call,
+      ) async {
         throw PlatformException(code: 'MW_INIT');
       });
-      await expectLater(
-          MiddlewareNativeBridge.setScreenName('x'), completes);
+      await expectLater(MiddlewareNativeBridge.setScreenName('x'), completes);
     });
   });
 

@@ -50,14 +50,14 @@ class UILoggerProvider implements LoggerProvider {
       key,
       () =>
           UILoggerCreate.create(
-            delegate: _delegate.getLogger(
-              name,
-              version: version,
-              schemaUrl: schemaUrl,
-              attributes: attributes,
-            ),
-          )
-          as OTelLogger,
+                delegate: _delegate.getLogger(
+                  name,
+                  version: version,
+                  schemaUrl: schemaUrl,
+                  attributes: attributes,
+                ),
+              )
+              as OTelLogger,
     );
   }
 

@@ -54,8 +54,7 @@ Future<Uint8List> _encodeWithOffscreenCanvas(
   double quality,
 ) async {
   final canvas = web.OffscreenCanvas(width, height);
-  final ctx =
-      canvas.getContext('2d') as web.OffscreenCanvasRenderingContext2D?;
+  final ctx = canvas.getContext('2d') as web.OffscreenCanvasRenderingContext2D?;
   if (ctx == null) {
     throw StateError('OffscreenCanvas 2D context unavailable');
   }
@@ -91,7 +90,9 @@ Future<Uint8List> _encodeWithCanvasElement(
       completer.completeError(StateError('Canvas toBlob returned null'));
       return;
     }
-    _blobToBytes(blob).then(completer.complete, onError: completer.completeError);
+    _blobToBytes(
+      blob,
+    ).then(completer.complete, onError: completer.completeError);
   }
 
   canvas.toBlob(onBlob.toJS, 'image/jpeg', quality.toJS);
