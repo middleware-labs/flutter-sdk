@@ -4,7 +4,6 @@ import 'dart:ui';
 
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 import 'package:meta/meta.dart';
-import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 
 part 'ui_span_create.dart';
 

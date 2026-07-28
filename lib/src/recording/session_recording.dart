@@ -43,8 +43,9 @@ String _rumResourceAttributesJson() {
   try {
     return jsonEncode(resource.attributes.toJson());
   } catch (e, st) {
-    if (kDebugMode)
+    if (kDebugMode) {
       debugPrint('RUM resourceAttributes jsonEncode failed: $e\n$st');
+    }
     return '{}';
   }
 }
@@ -471,8 +472,9 @@ class MiddlewareScreenshotManager {
     final storage = _storage;
     if (storage == null) return;
     try {
-      if (kDebugMode)
+      if (kDebugMode) {
         debugPrint('Checking for stale files from previous sessions…');
+      }
 
       final archives = await storage.archiveNames();
       if (archives.isNotEmpty) {
@@ -488,8 +490,9 @@ class MiddlewareScreenshotManager {
 
       final screenshots = await storage.screenshotNames();
       if (screenshots.isNotEmpty) {
-        if (kDebugMode)
+        if (kDebugMode) {
           debugPrint('Found ${screenshots.length} stale screenshot(s)');
+        }
         if (screenshots.length >= builder.recordingOptions.archiveChunkSize) {
           await _archiveScreenshots();
         } else {
@@ -558,8 +561,9 @@ class MiddlewareScreenshotManager {
                 completer.complete(true);
               },
               onErrorCallback: (e) {
-                if (kDebugMode)
+                if (kDebugMode) {
                   debugPrint('Failed to upload stale archive: $e');
+                }
                 completer.complete(false);
               },
             ),
@@ -567,8 +571,9 @@ class MiddlewareScreenshotManager {
           await completer.future.timeout(
             const Duration(seconds: 30),
             onTimeout: () {
-              if (kDebugMode)
+              if (kDebugMode) {
                 debugPrint('Timeout uploading stale archive: $fileName');
+              }
               return false;
             },
           );
@@ -854,7 +859,7 @@ class MiddlewareScreenshotManager {
     }
 
     if (kDebugMode) {
-      debugPrint('Session replay: scaling ${w}×$h → ${newW}×$newH');
+      debugPrint('Session replay: scaling $w×$h → $newW×$newH');
     }
 
     final recorder = ui.PictureRecorder();
