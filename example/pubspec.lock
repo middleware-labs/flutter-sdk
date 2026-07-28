@@ -74,7 +74,7 @@ packages:
     source: hosted
     version: "1.0.9"
   dartastic_opentelemetry_api:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: dartastic_opentelemetry_api
       sha256: "455130f250e007f9ef03eae29ac132dc44e04b606e5b5f011d42cd48f22f32d9"

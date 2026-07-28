@@ -1,4 +1,5 @@
 // Licensed under the Apache License, Version 2.0
+import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import 'package:flutter/material.dart';
 import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 

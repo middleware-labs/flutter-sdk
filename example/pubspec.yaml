@@ -34,6 +34,9 @@ dependencies:
   middleware_flutter_opentelemetry:
     path: ../
 
+  # Same exact pin as the SDK — rc.1 removed the Flutter semantic enums.
+  dartastic_opentelemetry_api: 1.0.0-beta.7
+
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
