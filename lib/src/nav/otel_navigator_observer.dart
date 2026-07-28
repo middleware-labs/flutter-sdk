@@ -41,15 +41,7 @@ class OTelNavigatorObserver extends NavigatorObserver {
       currentRouteData,
       newRouteChangeType,
     );
-    currentRouteData = newOTelRouteData;
-    // Drive the native screen-name store so native telemetry and the v3
-    // session recording carry the Dart route name. No-op on web / when the
-    // plugin is unavailable.
-    final screenName = currentRouteData?.routeName;
-    if (screenName != null && screenName.isNotEmpty) {
-      MiddlewareNativeBridge.setScreenName(screenName);
-    }
-    if (currentRouteData?.routeName != null) {
+    if (newRoute != null) {
       final startTime = DateTime.now();
       String type = "load";
       switch (newRouteChangeType) {
@@ -69,11 +61,11 @@ class OTelNavigatorObserver extends NavigatorObserver {
         'page.${type}_start_time',
         Duration.zero,
         attributes: {
-          'route': currentRouteData!.routeName,
+          'route': newOTelRouteData.routeName,
           'from_route':
               previousRoute != null
                   ? _routeDataForRoute(previousRoute)
-                  : currentRouteData!.routeName,
+                  : newOTelRouteData.routeName,
           'navigation_type': newRouteChangeType.value,
         },
       );
@@ -84,14 +76,14 @@ class OTelNavigatorObserver extends NavigatorObserver {
           double shiftScore = loadDuration.inMilliseconds / 100.0;
           if (shiftScore > 0.01) {
             FlutterMetricReporter().reportLayoutShift(
-              currentRouteData!.routeName,
+              newOTelRouteData.routeName,
               shiftScore,
               cause: 'page_load',
               attributes: {
-                'route': currentRouteData!.routeName,
+                'route': newOTelRouteData.routeName,
                 'load_time_ms': loadDuration.inMilliseconds,
                 'transition_type': newRouteChangeType.value,
-                'activity.name': currentRouteData!.routeName,
+                'activity.name': newOTelRouteData.routeName,
               },
             );
           }
@@ -101,12 +93,12 @@ class OTelNavigatorObserver extends NavigatorObserver {
         var slowCount = 0;
         var attributes =
             <String, Object>{
-              'activity.name': currentRouteData!.routeName,
-              'route': currentRouteData!.routeName,
+              'activity.name': newOTelRouteData.routeName,
+              'route': newOTelRouteData.routeName,
               'from_route':
                   previousRoute != null
                       ? _routeDataForRoute(previousRoute)
-                      : currentRouteData!.routeName,
+                      : newOTelRouteData.routeName,
             }.toAttributes();
         if (loadDuration.inMilliseconds > frozenFrameThresholdMs) {
           frozenCount += 1;
@@ -135,15 +127,15 @@ class OTelNavigatorObserver extends NavigatorObserver {
         }
 
         FlutterMetricReporter().reportPageLoad(
-          currentRouteData!.routeName,
+          newOTelRouteData.routeName,
           loadDuration,
           attributes: {
-            'route': currentRouteData!.routeName,
-            'activity.name': currentRouteData!.routeName,
+            'route': newOTelRouteData.routeName,
+            'activity.name': newOTelRouteData.routeName,
             'from_route':
                 previousRoute != null
                     ? _routeDataForRoute(previousRoute)
-                    : currentRouteData!.routeName,
+                    : newOTelRouteData.routeName,
             'transition_type': newRouteChangeType.value,
           },
         );
@@ -172,6 +164,15 @@ class OTelNavigatorObserver extends NavigatorObserver {
       currentRouteData = newOTelRouteData;
     }
     // If updateCurrentTo is null and useDefault is false, keep as-is
+
+    // Drive the native screen-name store so native telemetry and the v3
+    // session recording carry the Dart route name. Runs after the
+    // currentRouteData update so it always reflects the visible route.
+    // No-op on web / when the plugin is unavailable.
+    final screenName = currentRouteData?.routeName;
+    if (screenName != null && screenName.isNotEmpty) {
+      MiddlewareNativeBridge.setScreenName(screenName);
+    }
   }
 
   @override
