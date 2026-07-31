@@ -44,6 +44,20 @@ public class MiddlewareFlutterPlugin: NSObject, FlutterPlugin {
             }
             result(true)
 
+        // Method-channel calls arrive on the platform (main) thread, which is
+        // where MiddlewareRum applies recording state, so these are safe to
+        // call inline and the result reflects the settled state.
+        case "startRecording":
+            MiddlewareRum.startRecording()
+            result(MiddlewareRum.isRecording())
+
+        case "stopRecording":
+            MiddlewareRum.stopRecording()
+            result(!MiddlewareRum.isRecording())
+
+        case "isRecording":
+            result(MiddlewareRum.isRecording())
+
         case "nativeCrash":
             result(true)
             let values: [Int] = []

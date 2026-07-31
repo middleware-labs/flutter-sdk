@@ -104,6 +104,19 @@ class MiddlewareNativeBridge {
   static Future<void> setScreenName(String name) =>
       _invoke<void>('setScreenName', name);
 
+  /// Starts native (v3) session recording, overriding both a
+  /// `sessionRecording: false` configuration and the session sampler.
+  ///
+  /// Returns null when the native SDK is unavailable (web/desktop).
+  static Future<bool?> startRecording() => _invoke<bool>('startRecording');
+
+  /// Stops native (v3) session recording. Sticky across session rotation until
+  /// [startRecording] is called.
+  static Future<bool?> stopRecording() => _invoke<bool>('stopRecording');
+
+  /// Whether native (v3) session recording is currently running.
+  static Future<bool?> isRecording() => _invoke<bool>('isRecording');
+
   /// Test helper: crashes the native process (crash-reporting demo).
   static Future<void> nativeCrash() => _invoke<void>('nativeCrash');
 

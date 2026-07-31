@@ -77,6 +77,20 @@ class MiddlewareFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(true)
             }
 
+            // NoOpMiddleware makes these safe before initNativeSdk.
+            "startRecording" -> {
+                result.success(Middleware.getInstance().startRecording())
+            }
+
+            "stopRecording" -> {
+                Middleware.getInstance().stopRecording()
+                result.success(!Middleware.getInstance().isRecording())
+            }
+
+            "isRecording" -> {
+                result.success(Middleware.getInstance().isRecording())
+            }
+
             "nativeCrash" -> {
                 Thread {
                     try {

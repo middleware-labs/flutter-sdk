@@ -221,7 +221,11 @@ class UIMeterProvider implements MeterProvider {
 
   @override
   set resource(Resource? value) {
-    // TODO: implement resource
+    // Must delegate: post-init resource updates (session rotation, runtime
+    // recording toggles) are applied through this setter, and the getter above
+    // reads from the delegate — a no-op here would strand metrics on the
+    // init-time session.id / recording values.
+    _delegate.resource = value;
   }
 
   @override

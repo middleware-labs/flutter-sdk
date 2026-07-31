@@ -299,6 +299,9 @@ class MiddlewareScreenshotManager {
   Orientation? _lastOrientation;
   bool _isRunning = false;
 
+  /// Whether the recorder is currently capturing.
+  bool get isRunning => _isRunning;
+
   /// Set in [stop] before timers are cancelled so late async capture work can
   /// bail out safely (parity with Android `stopped`).
   bool _stopped = false;
