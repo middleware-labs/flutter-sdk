@@ -2,7 +2,7 @@ group = "io.middleware.flutter"
 version = "1.0"
 
 buildscript {
-    // android-sdk 3.0.2 ships Kotlin 2.x metadata; consumers need KGP >= 2.0.
+    // android-sdk 3.1.0 ships Kotlin 2.x metadata; consumers need KGP >= 2.0.
     ext.kotlin_version = "2.0.21"
     repositories {
         google()
@@ -16,6 +16,7 @@ buildscript {
 
 allprojects {
     repositories {
+        mavenLocal()
         google()
         mavenCentral()
     }
@@ -46,7 +47,7 @@ android {
 dependencies {
     // Stable Middleware native SDK: session linking, screen-name store,
     // v3 session recording, crash/ANR/network/slow-render instrumentation.
-    implementation "io.github.middleware-labs:android-sdk:3.0.2"
+    implementation "io.github.middleware-labs:android-sdk:3.1.0"
     // Compile-visible OTel types used by the bridge (Attributes/AttributeKey);
     // runtime classes come transitively from android-sdk. Keep the version
     // aligned with the SDK's opentelemetry-bom.

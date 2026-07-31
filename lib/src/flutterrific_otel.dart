@@ -349,7 +349,6 @@ class FlutterOTel {
 
   /// Get the repaint boundary key for wrapping your app
   static GlobalKey get repaintBoundaryKey => _repaintBoundaryKey;
-  static bool isRecording = false;
   static final Map<String, Object> _globalAttributes = {};
 
   /// [enableAutomaticUserInteractions] registers a global pointer route that
@@ -494,10 +493,7 @@ class FlutterOTel {
     if (_screenshotManager == null) {
       // The Dart recorder's capture tick normally drives session idle checks;
       // keep them alive when the native recorder (or no recorder) runs.
-      _idleCheckTimer?.cancel();
-      _idleCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-        _sessionManager?.checkIdleTime();
-      });
+      _startIdleCheckTimer();
     }
     resourceAttributes = resourceAttributes.copyWithAttributes(
       <String, Object>{
@@ -767,15 +763,33 @@ class FlutterOTel {
     }
   }
 
+  /// Starts session recording.
+  ///
+  /// Works on both recording paths: the native (v3) recorder on Android/iOS and
+  /// the Dart recorder used for web and the explicit v3 opt-out.
+  ///
+  /// On the native path this overrides both `enableSessionRecording: false` and
+  /// the session sampler, and is sticky — recording keeps running across session
+  /// rotations until [stopSessionRecording] is called. That makes it usable for
+  /// recording only a specific flow:
+  ///
+  /// ```dart
+  /// await FlutterOTel.initialize(enableSessionRecording: false, ...);
+  /// // ...later
+  /// await FlutterOTel.startSessionRecording();
+  /// ```
   static Future<void> startSessionRecording() async {
     if (_nativeSdkActive && _screenshotManager == null) {
-      if (kDebugMode) {
-        debugPrint(
-          'v3 session recording is managed by the native SDK; '
-          'startSessionRecording is a no-op.',
-        );
+      final started = await MiddlewareNativeBridge.startRecording();
+      if (started == true) {
+        _sessionManager?.hasRecording = true;
+        _setRecordingResourceAttributes(recording: true, v3: true);
+        if (kDebugMode) {
+          debugPrint('Session recording started (native v3)');
+        }
+      } else if (kDebugMode) {
+        debugPrint('Failed to start native session recording');
       }
-      _sessionManager?.hasRecording = true;
       return;
     }
     if (_screenshotManager == null) {
@@ -790,6 +804,10 @@ class FlutterOTel {
     try {
       _sessionManager?.hasRecording = true;
       await _screenshotManager!.start(DateTime.now().millisecondsSinceEpoch);
+      // The recorder's capture tick drives idle checks again.
+      _idleCheckTimer?.cancel();
+      _idleCheckTimer = null;
+      _setRecordingResourceAttributes(recording: true, v3: false);
       if (kDebugMode) {
         debugPrint('Session recording started');
       }
@@ -800,24 +818,65 @@ class FlutterOTel {
     }
   }
 
-  /// Stop session recording
+  /// Stops session recording.
+  ///
+  /// On the native path the stop is sticky: it survives session rotation and
+  /// sampler re-evaluation until [startSessionRecording] is called.
   static Future<void> stopSessionRecording() async {
     if (_nativeSdkActive && _screenshotManager == null) {
-      if (kDebugMode) {
-        debugPrint(
-          'v3 session recording is managed by the native SDK and cannot be '
-          'stopped mid-session; use disableSessionRecordingV3 to opt out.',
-        );
+      final stopped = await MiddlewareNativeBridge.stopRecording();
+      if (stopped == true) {
+        _sessionManager?.hasRecording = false;
+        _setRecordingResourceAttributes(recording: false, v3: true);
+        if (kDebugMode) {
+          debugPrint('Session recording stopped (native v3)');
+        }
+      } else if (kDebugMode) {
+        debugPrint('Failed to stop native session recording');
       }
       return;
     }
     if (_screenshotManager != null) {
       await _screenshotManager!.stop();
       _sessionManager?.hasRecording = false;
+      // The capture tick that drove idle checks is gone; fall back to the timer.
+      _startIdleCheckTimer();
+      _setRecordingResourceAttributes(recording: false, v3: false);
       if (kDebugMode) {
         debugPrint('Session recording stopped');
       }
     }
+  }
+
+  /// Whether session recording is currently running, on whichever path is
+  /// active. Returns false when no recorder was configured.
+  static Future<bool> isSessionRecording() async {
+    if (_nativeSdkActive && _screenshotManager == null) {
+      return await MiddlewareNativeBridge.isRecording() ?? false;
+    }
+    return _screenshotManager?.isRunning ?? false;
+  }
+
+  /// Keeps the `recording` / `recordingV3` resource attributes in step with the
+  /// live recording state. They are set once at init, but recording can be
+  /// toggled at runtime — and these are what tell the backend a session has a
+  /// replay to play back.
+  static void _setRecordingResourceAttributes({
+    required bool recording,
+    required bool v3,
+  }) {
+    _mergeProviderResourceAttributes(<String, Object>{
+      'recording': recording ? '1' : '0',
+      'recordingV3': (recording && v3) ? '1' : '0',
+    });
+  }
+
+  /// Drives session idle checks while no Dart capture tick is running.
+  static void _startIdleCheckTimer() {
+    _idleCheckTimer?.cancel();
+    _idleCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _sessionManager?.checkIdleTime();
+    });
   }
 
   /// Set one or more global attributes that will be injected into all spans.

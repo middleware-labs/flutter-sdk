@@ -478,8 +478,40 @@ FlutterOTel().dispose();
 
 ### 3. Session Replay
 
-Flutter SDK has the capability of session recording, to start session recording call `FlutterOTel.startSessionRecording();`  
-& to stop session recording call `FlutterOTel.stopSessionRecording()`
+Session recording is enabled by default. On Android and iOS it is captured by
+the native SDKs (v3 rrweb replay); on web, and when `disableSessionRecordingV3`
+is set, the Dart screenshot recorder is used instead.
+
+You can control it at runtime on either path:
+
+```dart
+await FlutterOTel.startSessionRecording();
+await FlutterOTel.stopSessionRecording();
+final recording = await FlutterOTel.isSessionRecording();
+```
+
+Both calls are **sticky**: they survive session rotation and override the
+session sampler, so recording stays in the state you asked for until you change
+it again. `startSessionRecording()` also overrides
+`enableSessionRecording: false`, which lets you keep recording off by default
+and turn it on only for the flows you care about:
+
+```dart
+await FlutterOTel.initialize(
+  serviceName: 'my-app',
+  middlewareAccountKey: '<account-key>',
+  enableSessionRecording: false,
+);
+
+// ...later, e.g. when the user enters checkout
+await FlutterOTel.startSessionRecording();
+// ...
+await FlutterOTel.stopSessionRecording();
+```
+
+The `RepaintBoundary` below is required only for the **Dart** recorder (web /
+v3 opt-out); the native v3 recorder captures the real window, including platform
+views.
 
 ```dart
 class MyAppState extends State<MyApp> {

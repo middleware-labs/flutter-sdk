@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.0
+
+- `FlutterOTel.startSessionRecording()` / `stopSessionRecording()` now work on
+  the **native v3** path (Android/iOS), where they were previously no-ops — they
+  only drove the Dart recorder used for web and the v3 opt-out.
+- Added `FlutterOTel.isSessionRecording()`.
+- Recording control is sticky: it survives session rotation and sampler
+  re-evaluation, and `startSessionRecording()` overrides both
+  `enableSessionRecording: false` and the sampler, so a session can be recorded
+  on demand for a single flow.
+- The `recording` / `recordingV3` resource attributes now follow the live
+  recording state instead of being frozen at init.
+- Fixed `UIMeterProvider.resource` being a no-op setter, which stranded metrics
+  on the init-time `session.id` and recording attributes across session
+  rotations.
+- Removed the unused public `FlutterOTel.isRecording` field (it was always
+  `false` and never updated); use `isSessionRecording()`.
+- Bumped native SDKs to `MiddlewareRum ~> 2.2` and
+  `io.github.middleware-labs:android-sdk:3.1.0`, which add the underlying
+  start/stop recording APIs.
+
 ## 1.1.1
 
 - Converted the package from a pure-Dart package to a Flutter plugin with

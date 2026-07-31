@@ -129,6 +129,43 @@ void main() {
       });
       await expectLater(MiddlewareNativeBridge.setScreenName('x'), completes);
     });
+
+    test('recording controls invoke their channel methods', () async {
+      final methods = <String>[];
+      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel, (
+        call,
+      ) async {
+        methods.add(call.method);
+        return true;
+      });
+
+      expect(await MiddlewareNativeBridge.startRecording(), isTrue);
+      expect(await MiddlewareNativeBridge.stopRecording(), isTrue);
+      expect(await MiddlewareNativeBridge.isRecording(), isTrue);
+      expect(methods, ['startRecording', 'stopRecording', 'isRecording']);
+    });
+
+    test('recording controls return the native result', () async {
+      messenger.setMockMethodCallHandler(
+        MiddlewareNativeBridge.channel,
+        (call) async => false,
+      );
+
+      expect(await MiddlewareNativeBridge.startRecording(), isFalse);
+      expect(await MiddlewareNativeBridge.isRecording(), isFalse);
+    });
+
+    test('recording controls return null when the plugin is missing', () async {
+      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel, (
+        call,
+      ) async {
+        throw MissingPluginException();
+      });
+
+      // web/desktop: no native recorder, so callers must treat null as "off"
+      expect(await MiddlewareNativeBridge.startRecording(), isNull);
+      expect(await MiddlewareNativeBridge.isRecording(), isNull);
+    });
   });
 
   group('RecordingOptions.toNativeMap', () {
