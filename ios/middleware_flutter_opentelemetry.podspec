@@ -17,7 +17,7 @@ reporting and v3 session recording.
   s.dependency 'Flutter'
   # Stable native SDK (2.1+ adds setNativeSession); static_framework pod,
   # brings PLCrashReporter/DeviceKit/SwiftProtobuf/SWCompression/Reachability.
-  s.dependency 'MiddlewareRum', '~> 2.2'
+  s.dependency 'MiddlewareRum', '~> 2.2', '>= 2.2.4'
 
   s.swift_version = '5.0'
   # MiddlewareRum is a static framework; this pod must be static too so apps
