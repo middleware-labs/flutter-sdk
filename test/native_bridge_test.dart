@@ -37,7 +37,6 @@ void main() {
         projectName: 'svc',
         deploymentEnvironment: 'dev',
         sessionRecording: true,
-        disableSessionRecordingV3: false,
         sessionSamplingRatio: 1.0,
         recordingOptions: const {'frequency': 'standard'},
       );
@@ -50,7 +49,6 @@ void main() {
       expect(args['projectName'], 'svc');
       expect(args['deploymentEnvironment'], 'dev');
       expect(args['sessionRecording'], true);
-      expect(args['disableSessionRecordingV3'], false);
       expect(args['sessionSamplingRatio'], 1.0);
       expect((args['recordingOptions'] as Map)['frequency'], 'standard');
       expect(info?['appVersion'], '1.2.3');

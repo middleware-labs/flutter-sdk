@@ -61,7 +61,6 @@ class MiddlewareNativeBridge {
     int? sessionStartTimeMs,
     String? deploymentEnvironment,
     bool sessionRecording = true,
-    bool disableSessionRecordingV3 = false,
     double? sessionSamplingRatio,
     Map<String, Object?>? recordingOptions,
     Map<String, Object?>? resourceAttributes,
@@ -80,7 +79,6 @@ class MiddlewareNativeBridge {
       if (deploymentEnvironment != null)
         'deploymentEnvironment': deploymentEnvironment,
       'sessionRecording': sessionRecording,
-      'disableSessionRecordingV3': disableSessionRecordingV3,
       if (sessionSamplingRatio != null)
         'sessionSamplingRatio': sessionSamplingRatio,
       if (recordingOptions != null) 'recordingOptions': recordingOptions,

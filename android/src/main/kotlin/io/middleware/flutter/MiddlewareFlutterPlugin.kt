@@ -147,9 +147,6 @@ class MiddlewareFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         if (config["sessionRecording"] != true) {
             builder.disableSessionRecording()
         }
-        if (config["disableSessionRecordingV3"] == true) {
-            builder.disableSessionRecordingV3()
-        }
         (config["sessionSamplingRatio"] as? Number)?.let { builder.setSessionSamplingRatio(it.toDouble()) }
         @Suppress("UNCHECKED_CAST")
         (config["recordingOptions"] as? Map<String, Any?>)?.let {

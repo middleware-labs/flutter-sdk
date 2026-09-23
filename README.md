@@ -479,8 +479,8 @@ FlutterOTel().dispose();
 ### 3. Session Replay
 
 Session recording is enabled by default. On Android and iOS it is captured by
-the native SDKs (v3 rrweb replay); on web, and when `disableSessionRecordingV3`
-is set, the Dart screenshot recorder is used instead.
+the native SDKs (rrweb replay); on web the Dart screenshot recorder is used
+instead.
 
 You can control it at runtime on either path:
 

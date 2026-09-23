@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.0
+
+- **Breaking:** removed the `disableSessionRecordingV3` option from
+  `FlutterOTel.initialize`. On Android/iOS the native recorder is now the only
+  recorder; the Dart screenshot recorder is used on web only.
+- Removed the `recordingV3` resource attribute. The backend no longer reads
+  it; `recording` still signals that a session has a replay.
+
 ## 1.2.0
 
 - `FlutterOTel.startSessionRecording()` / `stopSessionRecording()` now work on

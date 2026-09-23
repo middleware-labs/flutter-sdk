@@ -109,9 +109,6 @@ public class MiddlewareFlutterPlugin: NSObject, FlutterPlugin {
         if (config["sessionRecording"] as? Bool) != true {
             _ = builder.disableRecording()
         }
-        if config["disableSessionRecordingV3"] as? Bool == true {
-            _ = builder.disableSessionRecordingV3()
-        }
         if let recordingOptions = config["recordingOptions"] as? [String: Any] {
             _ = builder.recordingOptions(mapRecordingOptions(recordingOptions))
         }
