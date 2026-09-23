@@ -550,7 +550,7 @@ class FlutterOTel {
       );
 
       // Wrap with common attribute injector
-      commonAttributesFunction ??= () => sdk.OTel.attributes();
+      FlutterOTel.commonAttributesFunction ??= () => sdk.OTel.attributes();
       spanProcessor = CommonAttributeSpanProcessor(
         delegate: baseProcessor,
         commonAttributesFn: FlutterOTel.commonAttributesFunction!,
