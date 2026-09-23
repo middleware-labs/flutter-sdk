@@ -373,11 +373,9 @@ class FlutterOTel {
     String? deploymentEnvironment,
     Duration? flushTracesInterval = const Duration(seconds: 30),
     bool detectPlatformResources = true,
-    // Session recording configuration. On Android/iOS the native SDKs run
-    // v3 session recording by default; the pure-Dart recorder is used on web
-    // (and on mobile when [disableSessionRecordingV3] is true).
+    // Session recording configuration. On Android/iOS the native SDKs record
+    // the session; the pure-Dart recorder is used on web.
     bool enableSessionRecording = true,
-    bool disableSessionRecordingV3 = false,
     double? sessionSamplingRatio,
     // Installs FlutterError.onError + PlatformDispatcher.onError handlers
     // that call reportError, chaining any previously-installed handlers.
@@ -456,15 +454,13 @@ class FlutterOTel {
 
     final hasAccountKey =
         middlewareAccountKey != null && middlewareAccountKey.isNotEmpty;
-    // Native v3 recording is the default on Android/iOS; the Dart recorder
-    // covers web and the explicit v3 opt-out.
-    final nativeV3Intended =
+    // Native recording covers Android/iOS; the Dart recorder covers web.
+    final nativeRecordingIntended =
         MiddlewareNativeBridge.isSupported &&
         hasAccountKey &&
-        enableSessionRecording &&
-        !disableSessionRecordingV3;
+        enableSessionRecording;
 
-    if (hasAccountKey && enableSessionRecording && !nativeV3Intended) {
+    if (hasAccountKey && enableSessionRecording && !nativeRecordingIntended) {
       try {
         final builder = MiddlewareBuilder(
           target: endpoint,
@@ -504,12 +500,9 @@ class FlutterOTel {
         'os': _operatingSystemName(),
         'recording':
             (enableSessionRecording &&
-                    (nativeV3Intended || _screenshotManager != null))
+                    (nativeRecordingIntended || _screenshotManager != null))
                 ? '1'
                 : '0',
-        // Routes bifrost to the rrweb player; patched to '0' post-init if
-        // the native SDK turns out to be unavailable.
-        'recordingV3': nativeV3Intended ? '1' : '0',
       }.toAttributes(),
     );
 
@@ -662,7 +655,6 @@ class FlutterOTel {
         sessionStartTimeMs: sessionStartTime,
         deploymentEnvironment: deploymentEnvironment,
         sessionRecording: enableSessionRecording,
-        disableSessionRecordingV3: disableSessionRecordingV3,
         sessionSamplingRatio: sessionSamplingRatio,
         recordingOptions: recordingOptions.toNativeMap(),
       );
@@ -682,13 +674,9 @@ class FlutterOTel {
           if (osVersion != null) 'os.version': osVersion,
           if (deviceModel != null) 'device.model.name': deviceModel,
         });
-      } else if (nativeV3Intended) {
-        // Native SDK unavailable: correct the recordingV3 signal so bifrost
-        // doesn't route this session to the rrweb player.
-        _mergeProviderResourceAttributes(<String, Object>{
-          'recordingV3': '0',
-          'recording': _screenshotManager == null ? '0' : '1',
-        });
+      } else if (nativeRecordingIntended) {
+        // Native SDK unavailable: nothing is recording this session.
+        _mergeProviderResourceAttributes(<String, Object>{'recording': '0'});
       }
     }
     //Create observers
@@ -783,7 +771,7 @@ class FlutterOTel {
       final started = await MiddlewareNativeBridge.startRecording();
       if (started == true) {
         _sessionManager?.hasRecording = true;
-        _setRecordingResourceAttributes(recording: true, v3: true);
+        _setRecordingResourceAttributes(true);
         if (kDebugMode) {
           debugPrint('Session recording started (native v3)');
         }
@@ -807,7 +795,7 @@ class FlutterOTel {
       // The recorder's capture tick drives idle checks again.
       _idleCheckTimer?.cancel();
       _idleCheckTimer = null;
-      _setRecordingResourceAttributes(recording: true, v3: false);
+      _setRecordingResourceAttributes(true);
       if (kDebugMode) {
         debugPrint('Session recording started');
       }
@@ -827,7 +815,7 @@ class FlutterOTel {
       final stopped = await MiddlewareNativeBridge.stopRecording();
       if (stopped == true) {
         _sessionManager?.hasRecording = false;
-        _setRecordingResourceAttributes(recording: false, v3: true);
+        _setRecordingResourceAttributes(false);
         if (kDebugMode) {
           debugPrint('Session recording stopped (native v3)');
         }
@@ -841,7 +829,7 @@ class FlutterOTel {
       _sessionManager?.hasRecording = false;
       // The capture tick that drove idle checks is gone; fall back to the timer.
       _startIdleCheckTimer();
-      _setRecordingResourceAttributes(recording: false, v3: false);
+      _setRecordingResourceAttributes(false);
       if (kDebugMode) {
         debugPrint('Session recording stopped');
       }
@@ -857,17 +845,12 @@ class FlutterOTel {
     return _screenshotManager?.isRunning ?? false;
   }
 
-  /// Keeps the `recording` / `recordingV3` resource attributes in step with the
-  /// live recording state. They are set once at init, but recording can be
-  /// toggled at runtime — and these are what tell the backend a session has a
-  /// replay to play back.
-  static void _setRecordingResourceAttributes({
-    required bool recording,
-    required bool v3,
-  }) {
+  /// Keeps the `recording` resource attribute in step with the live recording
+  /// state. It is set once at init, but recording can be toggled at runtime —
+  /// and it is what tells the backend a session has a replay to play back.
+  static void _setRecordingResourceAttributes(bool recording) {
     _mergeProviderResourceAttributes(<String, Object>{
       'recording': recording ? '1' : '0',
-      'recordingV3': (recording && v3) ? '1' : '0',
     });
   }
 

@@ -106,9 +106,7 @@ public class MiddlewareFlutterPlugin: NSObject, FlutterPlugin {
         if let ratio = config["sessionSamplingRatio"] as? Double {
             _ = builder.sessionSamplingRatio(samplingRatio: ratio)
         }
-        // The Dart recorder takes over when v3 is opted out, so native must not record.
-        if (config["sessionRecording"] as? Bool) != true
-            || config["disableSessionRecordingV3"] as? Bool == true {
+        if (config["sessionRecording"] as? Bool) != true {
             _ = builder.disableRecording()
         }
         if let recordingOptions = config["recordingOptions"] as? [String: Any] {

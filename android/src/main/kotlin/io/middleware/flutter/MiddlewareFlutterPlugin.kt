@@ -144,8 +144,7 @@ class MiddlewareFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         (config["deploymentEnvironment"] as? String)?.let { builder.setDeploymentEnvironment(it) }
         attributesFrom(config["resourceAttributes"])?.let { builder.setResourceAttributes(it) }
         attributesFrom(config["globalAttributes"])?.let { builder.setGlobalAttributes(it) }
-        // The Dart recorder takes over when v3 is opted out, so native must not record.
-        if (config["sessionRecording"] != true || config["disableSessionRecordingV3"] == true) {
+        if (config["sessionRecording"] != true) {
             builder.disableSessionRecording()
         }
         (config["sessionSamplingRatio"] as? Number)?.let { builder.setSessionSamplingRatio(it.toDouble()) }
