@@ -7,7 +7,8 @@
   recorder; the Dart screenshot recorder is used on web only.
 - Removed the `recordingV3` resource attribute. The backend no longer reads
   it; `recording` still signals that a session has a replay.
-- Bumped the native Android SDK to `io.github.middleware-labs:android-sdk:3.1.5`.
+- Bumped the native SDKs to `io.github.middleware-labs:android-sdk:3.1.5` and
+  `MiddlewareRum` >= 2.2.4.
 
 ## 1.2.0
 
