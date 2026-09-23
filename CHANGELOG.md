@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.2
+
+- Fixed Android session replay: Android sessions recorded nothing. Two causes:
+  - Flutter draws its UI into a `SurfaceView`, which the native recorder
+    neither captured nor noticed changing, so it gave up after the first
+    frame. Fixed in the native SDK; bumped to
+    `io.github.middleware-labs:android-sdk:3.1.6`.
+  - The native SDK was initialized with the `Application` context after
+    `FlutterActivity` had already resumed, so the recorder had no activity to
+    capture until the app was backgrounded and reopened. The plugin is now
+    `ActivityAware` and initializes the native SDK with the attached activity.
+- No more extra one-span "Anonymous" session per app launch on Android (the
+  native SDK's `record init` sampling probe, fixed in android-sdk 3.1.6).
+
 ## 2.0.1
 
 - Bumped the native SDKs to `io.github.middleware-labs:android-sdk:3.1.5` and

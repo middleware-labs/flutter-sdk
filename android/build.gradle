@@ -47,7 +47,7 @@ android {
 dependencies {
     // Stable Middleware native SDK: session linking, screen-name store,
     // v3 session recording, crash/ANR/network/slow-render instrumentation.
-    implementation "io.github.middleware-labs:android-sdk:3.1.5"
+    implementation "io.github.middleware-labs:android-sdk:3.1.6"
     // Compile-visible OTel types used by the bridge (Attributes/AttributeKey);
     // runtime classes come transitively from android-sdk. Keep the version
     // aligned with the SDK's opentelemetry-bom.

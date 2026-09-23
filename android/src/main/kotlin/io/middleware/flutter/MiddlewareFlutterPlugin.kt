@@ -2,11 +2,14 @@
 
 package io.middleware.flutter
 
+import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.middleware.android.sdk.Middleware
@@ -17,6 +20,7 @@ import io.middleware.android.sdk.core.replay.v2.RecordingOptions
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api.common.AttributesBuilder
+import java.lang.ref.WeakReference
 
 /**
  * Thin bridge over the stable Middleware Android SDK.
@@ -27,10 +31,11 @@ import io.opentelemetry.api.common.AttributesBuilder
  * crash/ANR reporting, network monitoring, slow rendering, and the v3
  * session recording (which follows the injected session and screen names).
  */
-class MiddlewareFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
+class MiddlewareFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler {
 
     private lateinit var channel: MethodChannel
     private var applicationContext: Context? = null
+    private var activityRef: WeakReference<Activity>? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext = binding.applicationContext
@@ -41,6 +46,22 @@ class MiddlewareFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
         applicationContext = null
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activityRef = WeakReference(binding.activity)
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activityRef = null
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activityRef = WeakReference(binding.activity)
+    }
+
+    override fun onDetachedFromActivity() {
+        activityRef = null
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -155,7 +176,13 @@ class MiddlewareFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
         // v3 session recording starts inside build() (sampler-gated).
         // Middleware.initialize is singleton-guarded, so hot restart is safe.
-        builder.build(application)
+        // Dart calls this after FlutterActivity has already resumed, so the
+        // recorder never sees the onActivityResumed it attaches on; given only
+        // the Application it would capture nothing until the app is
+        // backgrounded and reopened. Passing the Activity seeds the recorder's
+        // current activity. Without one (headless engine) it attaches on the
+        // next resume.
+        builder.build(activityRef?.get() ?: application)
 
         // Link the Dart-owned session immediately, before the v3 recorder
         // captures its first frame, so no telemetry lands under the native
