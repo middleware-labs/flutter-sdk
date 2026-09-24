@@ -1,76 +1,36 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter/scheduler.dart';
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
-import 'package:uuid/uuid.dart';
 
 import 'jpeg_encoder.dart' as jpeg;
-import 'recording_storage.dart';
+import 'rrweb_events.dart';
+import 'rrweb_exporter.dart';
 
-// ---------------------------------------------------------------------------
-// Bandwidth budget (rough numbers at default settings):
-//
-//  Old defaults: PNG, 320 min-dim, 2 s interval, chunk=10
-//    ~120–300 KB per frame × 1800 frames/2 h ≈ 216–540 MB raw
-//    After gzip of PNG-inside-tar: ~190–500 MB  ← matches the reported >1.5 GB
-//    (PNG is already compressed so gzip barely helps.)
-//
-//  New defaults: JPEG q=10, 320 min-short-side (parity with Android),
-//                4 s interval, chunk=10
-// ---------------------------------------------------------------------------
-
-/// Encodes form field / filename tokens like package:http multipart.
-String _multipartFormDataNameEncode(String value) {
-  return value
-      .replaceAll(RegExp(r'\r\n|\r|\n'), '%0D%0A')
-      .replaceAll('"', '%22');
-}
-
-/// OTLP resource attributes — computed once and cached.
-/// The resource is immutable after initialisation so caching is safe.
-String _rumResourceAttributesJson() {
-  final provider = OTel.tracerProvider();
-  provider.ensureResourceIsSet();
-  final resource = provider.resource;
-  if (resource == null) return '{}';
+/// Resource attributes stamped on every replay batch, read live from the
+/// tracer provider so runtime updates (session rotation, `recording`) are
+/// reflected. [sessionId] wins over the resource's own `session.id` because a
+/// batch can still hold events from the session that just rotated out.
+Map<String, String> _rumResourceAttributes(String sessionId) {
+  final attributes = <String, String>{};
   try {
-    return jsonEncode(resource.attributes.toJson());
-  } catch (e, st) {
-    if (kDebugMode) {
-      debugPrint('RUM resourceAttributes jsonEncode failed: $e\n$st');
+    final provider = OTel.tracerProvider();
+    provider.ensureResourceIsSet();
+    for (final attribute in provider.resource?.attributes.toList() ?? []) {
+      attributes[attribute.key] = attribute.value.toString();
     }
-    return '{}';
+  } catch (_) {
+    // resource not available yet; the batch still carries the session id
   }
-}
-
-/// Archive files are named `{sessionId}-{lastTs}.tar.gz` with a hyphen between
-/// the id and the timestamp (session id has no hyphens).
-String _sessionIdFromArchiveFileName(
-  String fileName,
-  String fallbackSessionId,
-) {
-  if (!fileName.endsWith('.tar.gz')) return fallbackSessionId;
-  final base = fileName.substring(0, fileName.length - 7);
-  final dash = base.indexOf('-');
-  if (dash <= 0) return fallbackSessionId;
-  return base.substring(0, dash);
-}
-
-/// Callback for screenshot capture
-typedef ScreenshotCallback = void Function(Uint8List imageData);
-
-/// Network callback interface
-abstract class NetworkCallback {
-  void onSuccess(String response);
-
-  void onError(Exception error);
+  attributes['session.id'] = sessionId;
+  return attributes;
 }
 
 /// Capture frequency of the NATIVE v3 recorder (Android/iOS).
@@ -81,13 +41,12 @@ enum NativeRecordingQuality { low, standard, high }
 
 /// Recording options configuration
 class RecordingOptions {
-  /// How often a screenshot is attempted.  4 s is a good balance; use 6–8 s
-  /// for even lower bandwidth.
+  /// How often a frame is captured. Default 1 s, the native SDKs' default
+  /// frequency; frames are skipped anyway while nothing is rendered.
   final Duration screenshotInterval;
 
-  /// JPEG quality 1–100.  35 is visually acceptable for session replay and
-  /// produces files ≈ 8–25 KB at 240 p.  Do NOT go above 60 without also
-  /// reducing [minShortSidePx].
+  /// JPEG quality 1–100. Default 50, the native SDKs' "standard" quality
+  /// (Android and iOS use 25 / 50 / 75 for low / standard / high).
   final int qualityValue;
 
   /// FIX #1 — Renamed from maxDimension.
@@ -100,13 +59,20 @@ class RecordingOptions {
   ///
   /// This keeps the same visual density on both orientations and is consistent
   /// with how the Middleware backend expects session-replay frames to be sized.
+  /// Default 640, the native SDKs' short edge. Frames are captured at up to
+  /// the device pixel ratio to reach it, and never upscaled beyond that.
   final int minShortSidePx;
 
-  /// Number of frames to bundle per archive before uploading.
+  @Deprecated('No effect: frames are streamed as rrweb events, not archived.')
   final int archiveChunkSize;
 
+  @Deprecated('No effect: frames are streamed as rrweb events, not archived.')
   final Duration staleArchiveMaxAge;
+
+  @Deprecated('No effect: frames are streamed as rrweb events, not archived.')
   final Duration staleScreenshotMaxAge;
+
+  @Deprecated('No effect: frames are streamed as rrweb events, not archived.')
   final bool uploadStaleFilesOnStart;
 
   /// NATIVE v3 recorder options (Android/iOS only). Null values use the
@@ -124,9 +90,9 @@ class RecordingOptions {
   final bool? maskAllImages;
 
   const RecordingOptions({
-    this.screenshotInterval = const Duration(milliseconds: 500),
-    this.qualityValue = 10,
-    this.minShortSidePx = 320,
+    this.screenshotInterval = const Duration(seconds: 1),
+    this.qualityValue = 50,
+    this.minShortSidePx = 640,
     this.archiveChunkSize = 10,
     this.staleArchiveMaxAge = const Duration(seconds: 59),
     this.staleScreenshotMaxAge = const Duration(seconds: 59),
@@ -162,118 +128,25 @@ class MiddlewareBuilder {
   });
 }
 
-/// Network manager for sending screenshots
-class NetworkManager {
-  static const String _imagesUrl = '/v1/rum';
-
-  final String baseUrl;
-  final String token;
-  final http.Client _client;
-
-  NetworkManager(this.baseUrl, this.token) : _client = http.Client();
-
-  Future<void> sendImages(
-    String sessionId,
-    String resourceAttributes,
-    Uint8List imageData,
-    String fileName,
-    NetworkCallback callback,
-  ) async {
-    if (token.isEmpty) {
-      callback.onError(Exception('Token is empty'));
-      return;
-    }
-
-    try {
-      final url = Uri.parse('$baseUrl$_imagesUrl');
-
-      final boundary = 'Boundary-${const Uuid().v4()}';
-      final body = BytesBuilder(copy: false);
-      void writeUtf8(String s) => body.add(utf8.encode(s));
-
-      for (final entry
-          in <String, String>{
-            'sessionId': sessionId,
-            'resourceAttributes': resourceAttributes,
-          }.entries) {
-        writeUtf8('--$boundary\r\n');
-        writeUtf8(
-          'Content-Disposition: form-data; name="${_multipartFormDataNameEncode(entry.key)}"\r\n\r\n',
-        );
-        body.add(utf8.encode(entry.value));
-        writeUtf8('\r\n');
-      }
-
-      writeUtf8('--$boundary\r\n');
-      writeUtf8(
-        'Content-Disposition: form-data; name="batch"; '
-        'filename="${_multipartFormDataNameEncode(fileName)}"\r\n',
-      );
-      writeUtf8('Content-Type: application/x-tar\r\n\r\n');
-      body.add(imageData);
-      writeUtf8('\r\n');
-      writeUtf8('--$boundary--\r\n');
-
-      final request =
-          http.Request('POST', url)
-            ..headers['Authorization'] = token
-            ..headers['Content-Type'] =
-                'multipart/form-data; boundary=$boundary'
-            ..bodyBytes = body.toBytes();
-
-      if (kDebugMode) {
-        debugPrint(
-          'Uploading session replay: $fileName (${imageData.length} bytes)',
-        );
-      }
-
-      final streamedResponse = await _client.send(request);
-      final response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        if (kDebugMode) debugPrint('Upload successful: ${response.statusCode}');
-        callback.onSuccess(response.body);
-      } else {
-        if (kDebugMode) {
-          debugPrint(
-            'Upload failed: ${response.statusCode} - ${response.body}',
-          );
-        }
-        callback.onError(
-          Exception('Upload failed with status: ${response.statusCode}'),
-        );
-      }
-    } catch (e) {
-      if (kDebugMode) debugPrint('Network error: $e');
-      callback.onError(Exception('Network error: $e'));
-    }
-  }
-
-  void dispose() => _client.close();
-}
-
 // ---------------------------------------------------------------------------
 // Main screenshot manager
 // ---------------------------------------------------------------------------
 //
-// Lifecycle mirrors the Android `MiddlewareScreenshotManager` replay v2:
+// The Dart recorder, used where the native SDKs don't record (web, desktop).
+// Emits the same rrweb stream as the native v3 recorders: a Meta +
+// FullSnapshot pair per "epoch", an img-src mutation per changed frame, touch
+// interactions and screen-name custom events, exported by [RRWebExporter].
+//
+// An epoch restarts when the recorder starts, the session id rotates, the
+// viewport size changes, or the app becomes visible again.
+//
 // - `stopped` → [_stopped]: set before tearing down timers / network so late
 //   async capture callbacks can drop work safely.
 // - `captureInFlight` → [_captureInFlight]: periodic capture skips if the prior
-//   pipeline (through serialized disk write) is still running.
-//   NOTE: Dart is single-threaded on the event loop so a plain bool is safe
-//   here — there is no race between the timer callback and the capture
-//   completion because both run on the same isolate's microtask/event queue.
-//   compute() isolates never mutate this field directly; they only return a
-//   value via Future which is awaited back on the main isolate.
-// - Single-thread IO → [_serializedIoTail]: archives, file writes, and uploads
-//   are chained so they never overlap (like `ioExecutor` + FIFO queue).
-// - Terminal flush → [_terminateFlush]: last archive + send before recycling
-//   the HTTP client (like `terminateFlush` on the IO executor).
+//   capture is still running. Dart is single-threaded on the event loop so a
+//   plain bool is safe here.
 
-class MiddlewareScreenshotManager {
-  String _firstTs = '';
-  String _lastTs = '';
+class MiddlewareScreenshotManager with WidgetsBindingObserver {
   final MiddlewareBuilder builder;
   String _sessionId;
   final GlobalKey repaintBoundaryKey;
@@ -284,10 +157,15 @@ class MiddlewareScreenshotManager {
 
   String get sessionId => _sessionId;
 
-  void updateSessionId(String value) => _sessionId = value;
+  void updateSessionId(String value) {
+    if (value == _sessionId) return;
+    // session rotated: the old session's stream is complete, start a new
+    // epoch under the new id
+    _sessionId = value;
+    _resetEpoch();
+  }
 
   Timer? _screenshotTimer;
-  Timer? _uploadTimer;
 
   // FIX #5 — Changed from List<GlobalKey> to a Set to prevent duplicate
   // entries and make remove O(1). Dead-key pruning happens lazily in
@@ -296,43 +174,61 @@ class MiddlewareScreenshotManager {
   // collectMaskRects dead-WeakReference pruning).
   final Set<GlobalKey> _sanitizedElements = {};
 
-  Orientation? _lastOrientation;
   bool _isRunning = false;
 
   /// Whether the recorder is currently capturing.
   bool get isRunning => _isRunning;
 
   /// Set in [stop] before timers are cancelled so late async capture work can
-  /// bail out safely (parity with Android `stopped`).
+  /// bail out safely.
   bool _stopped = false;
 
-  /// If a capture pipeline is still running, the next periodic tick is skipped
-  /// instead of queueing another (parity with Android `captureInFlight`).
-  /// Safe as a plain bool — see class-level comment above.
+  /// If a capture is still running, the next periodic tick is skipped instead
+  /// of queueing another.
   bool _captureInFlight = false;
 
-  /// Last [_screenshotTick] future — [stop] awaits this before terminal flush.
+  /// Whether Flutter rendered a frame since the last capture. Nothing on
+  /// screen can have changed otherwise, so the tick skips the capture, the
+  /// GPU readback and the JPEG encode (identical frames used to be dropped
+  /// only after all three).
+  bool _renderedSinceCapture = true;
+  bool _watchingFrames = false;
+
+  void _watchFrames() {
+    if (_watchingFrames) return;
+    _watchingFrames = true;
+    SchedulerBinding.instance.addPostFrameCallback(_onFrameRendered);
+  }
+
+  // Re-arms itself for the next frame; registering doesn't schedule one, so
+  // an idle app costs nothing.
+  void _onFrameRendered(Duration _) {
+    _renderedSinceCapture = true;
+    if (_isRunning) {
+      SchedulerBinding.instance.addPostFrameCallback(_onFrameRendered);
+    } else {
+      _watchingFrames = false;
+    }
+  }
+
+  /// Last [_screenshotTick] future — [stop] awaits this before the final flush.
   Future<void>? _ongoingCapture;
 
-  /// Single FIFO chain for disk + archive + upload so work never overlaps
-  /// (parity with Android single-thread `ioExecutor`).
-  Future<void> _serializedIoTail = Future<void>.value();
+  /// Created in [start], shut down (final flush) in [stop].
+  RRWebExporter? _exporter;
 
-  /// Platform-specific persistence for screenshots and archives.
-  ///
-  /// Native builds use a filesystem-backed store (app documents directory);
-  /// web builds use an in-memory store since the browser has no such directory
-  /// and `dart:io` is unavailable. Resolved once in [start].
-  RecordingStorage? _storage;
+  // Epoch state
+  bool _sentMeta = false;
+  int _lastMetaWidth = -1;
+  int _lastMetaHeight = -1;
+  String? _lastFrameDataUri;
+  String? _lastScreenName;
 
-  /// In-memory count of screenshots pending in the screenshot folder.
-  /// Avoids a Directory.listSync() syscall after every single write.
-  int _pendingScreenshotCount = 0;
+  /// Current route name, pushed by the navigator observer.
+  String? _screenName;
 
-  /// Long-lived HTTP client — created once in [start], disposed in [stop].
-  /// Reusing the client keeps the TCP connection alive (HTTP keep-alive) so
-  /// each upload batch does not pay a full TCP+TLS handshake.
-  NetworkManager? _networkManager;
+  /// Whether the app was hidden/paused since the last frame.
+  bool _wasHidden = false;
 
   MiddlewareScreenshotManager({
     required this.builder,
@@ -345,24 +241,22 @@ class MiddlewareScreenshotManager {
   // Lifecycle
   // -------------------------------------------------------------------------
 
-  Future<void> start(int startTs) async {
+  Future<void> start() async {
     if (_isRunning) return;
 
     _stopped = false;
-    _firstTs = startTs.toString();
     _isRunning = true;
-    _lastOrientation = null;
-    _pendingScreenshotCount = 0;
-    _serializedIoTail = Future<void>.value();
+    _resetEpoch();
 
-    // Resolve the platform-appropriate storage once (filesystem on native,
-    // in-memory on web) and initialise its backing structures.
-    _storage = createRecordingStorage();
-    await _storage!.init();
+    _exporter = RRWebExporter(
+      target: builder.target,
+      token: builder.rumAccessToken,
+      resourceAttributes: _rumResourceAttributes,
+    );
 
-    _networkManager = NetworkManager(builder.target, builder.rumAccessToken);
-
-    await _cleanupStaleArchives();
+    WidgetsBinding.instance.addObserver(this);
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointerEvent);
+    _watchFrames();
 
     _screenshotTimer = Timer.periodic(
       builder.recordingOptions.screenshotInterval,
@@ -370,272 +264,73 @@ class MiddlewareScreenshotManager {
         unawaited(_screenshotTick());
       },
     );
-
-    // FIX #9 — Upload on the same cadence as screenshots, matching Java's
-    // `scheduleWithFixedDelay(...intervalMillis, intervalMillis, ...)`.
-    // Previously this was screenshotInterval × 3, which meant archives could
-    // sit on disk for up to 3× the interval before being sent.
-    _uploadTimer = Timer.periodic(builder.recordingOptions.screenshotInterval, (
-      _,
-    ) {
-      unawaited(_enqueueSerializedIo(sendScreenshots));
-    });
-
     unawaited(_screenshotTick());
-    Timer(const Duration(seconds: 2), () {
-      unawaited(_enqueueSerializedIo(sendScreenshots));
-    });
   }
 
   Future<void> stop() async {
     if (!_isRunning) return;
-    // Must be visible to any in-flight PixelCopy / async capture before we tear
-    // down executors or the network client (Android parity).
+    // Must be visible to any in-flight async capture before we tear down the
+    // exporter.
     _stopped = true;
     _isRunning = false;
     _screenshotTimer?.cancel();
     _screenshotTimer = null;
-    _uploadTimer?.cancel();
-    _uploadTimer = null;
+    WidgetsBinding.instance.removeObserver(this);
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointerEvent);
 
     try {
       await (_ongoingCapture ?? Future<void>.value());
-      await _enqueueSerializedIo(_terminateFlush, ignoreStopped: true);
+      await _exporter?.shutdown();
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('Session replay: error during shutdown pipeline: $e');
+        debugPrint('Session replay: error during shutdown: $e');
       }
     }
 
+    _exporter = null;
     _sanitizedElements.clear();
-    _lastOrientation = null;
-    _storage = null;
     _maskPatternImage?.dispose();
     _maskPatternImage = null;
-    _networkManager?.dispose();
-    _networkManager = null;
     _stopped = false;
   }
 
-  /// Append [job] after prior serialized IO work. Used for writes, archives,
-  /// uploads, and the terminal flush so those never run concurrently.
-  Future<void> _enqueueSerializedIo(
-    Future<void> Function() job, {
-    bool ignoreStopped = false,
-  }) {
-    final completer = Completer<void>();
-    _serializedIoTail = _serializedIoTail
-        .then((_) async {
-          try {
-            if (_stopped && !ignoreStopped) {
-              return;
-            }
-            await job();
-          } catch (e, st) {
-            if (kDebugMode) {
-              debugPrint('Session replay: serialized IO error: $e\n$st');
-            }
-          } finally {
-            if (!completer.isCompleted) {
-              completer.complete();
-            }
-          }
-        })
-        .catchError((Object e, StackTrace st) {
-          if (kDebugMode) {
-            debugPrint('Session replay: serialized IO chain error: $e\n$st');
-          }
-          if (!completer.isCompleted) {
-            completer.complete();
-          }
-        });
-    return completer.future;
-  }
-
-  Future<void> _terminateFlush() async {
-    try {
-      await _archiveScreenshots();
-      await sendScreenshots();
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Session replay: error during termination flush: $e');
-      }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+        // going away (tab hidden / app backgrounded): get buffered events out
+        // while we still can
+        _wasHidden = true;
+        unawaited(_exporter?.flush());
+      case AppLifecycleState.resumed:
+        if (_wasHidden && _sentMeta) {
+          // returning to the foreground: force a fresh Meta + FullSnapshot
+          _resetEpoch();
+        }
+        _wasHidden = false;
+      default:
+        break;
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Stale-file handling
-  // -------------------------------------------------------------------------
+  /// Sets the screen name used for the replay timeline and the Meta href.
+  void setScreenName(String name) => _screenName = name;
 
-  Future<void> _cleanupStaleArchives() async {
-    if (!builder.recordingOptions.uploadStaleFilesOnStart) {
-      if (kDebugMode) debugPrint('Stale file upload disabled by configuration');
-      return;
-    }
-    final storage = _storage;
-    if (storage == null) return;
-    try {
-      if (kDebugMode) {
-        debugPrint('Checking for stale files from previous sessions…');
-      }
-
-      final archives = await storage.archiveNames();
-      if (archives.isNotEmpty) {
-        if (kDebugMode) debugPrint('Found ${archives.length} stale archive(s)');
-        final ok = await _uploadStaleArchives(archives);
-        if (!ok) {
-          await _deleteOldArchives(
-            archives,
-            maxAge: builder.recordingOptions.staleArchiveMaxAge,
-          );
-        }
-      }
-
-      final screenshots = await storage.screenshotNames();
-      if (screenshots.isNotEmpty) {
-        if (kDebugMode) {
-          debugPrint('Found ${screenshots.length} stale screenshot(s)');
-        }
-        if (screenshots.length >= builder.recordingOptions.archiveChunkSize) {
-          await _archiveScreenshots();
-        } else {
-          await _deleteOldScreenshots(
-            screenshots,
-            maxAge: builder.recordingOptions.staleScreenshotMaxAge,
-          );
-        }
-      }
-      if (kDebugMode) debugPrint('Stale file cleanup completed');
-    } catch (e) {
-      if (kDebugMode) debugPrint('Error during stale file cleanup: $e');
-    }
-  }
-
-  Future<bool> _uploadStaleArchives(List<String> archives) async {
-    if (sessionId.isEmpty) return false;
-    final storage = _storage;
-    if (storage == null) return false;
-    // Stale upload runs during start() before _networkManager is assigned,
-    // so create a short-lived client just for this one-time operation.
-    final networkManager = NetworkManager(
-      builder.target,
-      builder.rumAccessToken,
-    );
-    try {
-      int successCount = 0;
-
-      for (final fileName in archives) {
-        try {
-          // FIX #3 — Stale archives by definition come from *previous* sessions.
-          // The old code skipped archives whose filename DID NOT start with
-          // sessionId, which is the wrong predicate — stale archives will never
-          // start with the current session id because a new session id is
-          // generated on each app launch.
-          //
-          // Correct behaviour (matching Java): attempt to upload every stale
-          // archive regardless of which session it belongs to. If the file is
-          // too old and the upload fails, fall through to age-based deletion.
-          // The uploadSessionId extracted below ensures each batch is attributed
-          // to the correct session on the backend.
-          final modified = await storage.archiveModified(fileName);
-          if (modified != null &&
-              DateTime.now().difference(modified) >
-                  builder.recordingOptions.staleArchiveMaxAge) {
-            await storage.deleteArchive(fileName);
-            continue;
-          }
-
-          final imageData = await storage.readArchive(fileName);
-          if (imageData == null) continue;
-          final completer = Completer<bool>();
-          final staleSessionId = _sessionIdFromArchiveFileName(
-            fileName,
-            sessionId,
-          );
-          await networkManager.sendImages(
-            staleSessionId,
-            _rumResourceAttributesJson(),
-            imageData,
-            fileName,
-            _NetworkCallbackImpl(
-              onSuccessCallback: (r) async {
-                await storage.deleteArchive(fileName);
-                successCount++;
-                completer.complete(true);
-              },
-              onErrorCallback: (e) {
-                if (kDebugMode) {
-                  debugPrint('Failed to upload stale archive: $e');
-                }
-                completer.complete(false);
-              },
-            ),
-          );
-          await completer.future.timeout(
-            const Duration(seconds: 30),
-            onTimeout: () {
-              if (kDebugMode) {
-                debugPrint('Timeout uploading stale archive: $fileName');
-              }
-              return false;
-            },
-          );
-        } catch (e) {
-          if (kDebugMode) debugPrint('Error uploading stale archive: $e');
-        }
-      }
-      return successCount > 0;
-    } catch (e) {
-      if (kDebugMode) debugPrint('Error in stale archive upload: $e');
-      return false;
-    } finally {
-      networkManager.dispose(); // always released, even on exception
-    }
-  }
-
-  Future<void> _deleteOldArchives(
-    List<String> archives, {
-    required Duration maxAge,
-  }) async {
-    final storage = _storage;
-    if (storage == null) return;
-    final now = DateTime.now();
-    for (final archive in archives) {
-      try {
-        final modified = await storage.archiveModified(archive);
-        if (modified != null && now.difference(modified) > maxAge) {
-          await storage.deleteArchive(archive);
-        }
-      } catch (e) {
-        if (kDebugMode) debugPrint('Error checking archive age: $e');
-      }
-    }
-  }
-
-  Future<void> _deleteOldScreenshots(
-    List<String> screenshots, {
-    required Duration maxAge,
-  }) async {
-    final storage = _storage;
-    if (storage == null) return;
-    final now = DateTime.now();
-    for (final screenshot in screenshots) {
-      try {
-        final modified = await storage.screenshotModified(screenshot);
-        if (modified != null && now.difference(modified) > maxAge) {
-          await storage.deleteScreenshot(screenshot);
-        }
-      } catch (e) {
-        if (kDebugMode) debugPrint('Error checking screenshot age: $e');
-      }
-    }
+  void _resetEpoch() {
+    _sentMeta = false;
+    _lastMetaWidth = -1;
+    _lastMetaHeight = -1;
+    _lastFrameDataUri = null;
+    _lastScreenName = null;
+    _renderedSinceCapture = true;
   }
 
   // -------------------------------------------------------------------------
   // Capture pipeline
   // -------------------------------------------------------------------------
 
-  /// One capture tick: UI-thread capture, then serialized disk / archive work.
+  /// One capture tick: capture, encode, emit.
   Future<void> _screenshotTick() {
     final run = _runScreenshotTick();
     _ongoingCapture = run;
@@ -651,11 +346,6 @@ class MiddlewareScreenshotManager {
       return;
     }
     if (_captureInFlight) {
-      if (kDebugMode) {
-        debugPrint(
-          'Session replay: screenshot skipped — previous capture still in flight',
-        );
-      }
       return;
     }
     _captureInFlight = true;
@@ -664,34 +354,103 @@ class MiddlewareScreenshotManager {
       if (_stopped) {
         return;
       }
-      _checkAndReportOrientationChange();
+      if (!_renderedSinceCapture && _lastFrameDataUri != null) {
+        return; // nothing rendered since the last frame we shipped
+      }
+      // Cleared before capturing: a frame rendered meanwhile marks it again.
+      _renderedSinceCapture = false;
 
-      final screenshotData = await _captureScreenshot();
-      if (_stopped || screenshotData == null) {
+      final frame = await _captureScreenshot();
+      if (_stopped || frame == null) {
         return;
       }
-
-      await _enqueueSerializedIo(() async {
-        if (_stopped) {
-          return;
-        }
-        final storage = _storage;
-        if (storage == null) return;
-        final timestamp = DateTime.now().millisecondsSinceEpoch;
-        await storage.writeScreenshot('$timestamp.jpeg', screenshotData);
-        _pendingScreenshotCount++;
-
-        if (_pendingScreenshotCount >=
-            builder.recordingOptions.archiveChunkSize) {
-          await _archiveScreenshots();
-          _pendingScreenshotCount = 0;
-        }
-      });
+      emitFrame(frame.jpeg, frame.width, frame.height);
     } catch (e) {
       debugPrint('Error making screenshot: $e');
     } finally {
       _captureInFlight = false;
     }
+  }
+
+  @visibleForTesting
+  set exporterForTest(RRWebExporter exporter) => _exporter = exporter;
+
+  /// Turns a captured frame into rrweb events: Meta + FullSnapshot when a new
+  /// epoch starts, otherwise an img-src mutation (skipped if unchanged).
+  @visibleForTesting
+  void emitFrame(Uint8List jpegBytes, int width, int height) {
+    final exporter = _exporter;
+    if (exporter == null || _sessionId.isEmpty) return;
+
+    final needsMeta =
+        !_sentMeta || width != _lastMetaWidth || height != _lastMetaHeight;
+    final dataUri = 'data:image/jpeg;base64,${base64Encode(jpegBytes)}';
+    if (!needsMeta && dataUri == _lastFrameDataUri) {
+      return; // identical frame, nothing to ship
+    }
+
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final screenName = _screenName;
+    if (needsMeta) {
+      exporter.enqueue(
+        RRWebEvents.meta(_href(screenName), width, height, timestamp),
+        _sessionId,
+      );
+      exporter.enqueue(
+        RRWebEvents.fullSnapshot(dataUri, width, height, timestamp),
+        _sessionId,
+      );
+      _sentMeta = true;
+      _lastMetaWidth = width;
+      _lastMetaHeight = height;
+    } else {
+      exporter.enqueue(
+        RRWebEvents.frameMutation(dataUri, timestamp),
+        _sessionId,
+      );
+    }
+    _lastFrameDataUri = dataUri;
+
+    if (screenName != null && screenName != _lastScreenName) {
+      _lastScreenName = screenName;
+      exporter.enqueue(
+        RRWebEvents.screenCustom(screenName, timestamp),
+        _sessionId,
+      );
+    }
+  }
+
+  /// The page URL on web (so the player's jump-to-path works); a synthetic
+  /// app URL elsewhere, like the native SDKs' `android-app://` hrefs.
+  String _href(String? screenName) =>
+      kIsWeb ? Uri.base.toString() : 'flutter-app://app/${screenName ?? ''}';
+
+  void _onPointerEvent(PointerEvent event) {
+    if (!_isRunning || !_sentMeta) {
+      return; // touches before the first FullSnapshot are unplayable
+    }
+    final int interactionType;
+    if (event is PointerDownEvent) {
+      interactionType = RRWebEvents.mouseInteractionTouchStart;
+    } else if (event is PointerUpEvent) {
+      interactionType = RRWebEvents.mouseInteractionTouchEnd;
+    } else {
+      return;
+    }
+    final boundary = _repaintBoundaryFromKey();
+    final position =
+        boundary != null && boundary.attached
+            ? boundary.globalToLocal(event.position)
+            : event.position;
+    _exporter?.enqueue(
+      RRWebEvents.touch(
+        interactionType,
+        position.dx.round(),
+        position.dy.round(),
+        DateTime.now().millisecondsSinceEpoch,
+      ),
+      _sessionId,
+    );
   }
 
   RenderRepaintBoundary? _repaintBoundaryFromKey() {
@@ -700,11 +459,61 @@ class MiddlewareScreenshotManager {
     return ro is RenderRepaintBoundary ? ro : null;
   }
 
-  /// Captures, optionally masks, downscales, encodes as lossy JPEG, and
-  /// applies perceptual-delta filtering.
+  /// What a frame is captured from: the app's
+  /// `RepaintBoundary(key: FlutterOTel.repaintBoundaryKey)` when it has one,
+  /// otherwise the whole root view, so replay needs no app changes.
   ///
-  /// Returns JPEG [Uint8List] or null when an error occurs.
-  Future<Uint8List?> _captureScreenshot() async {
+  /// [size] is logical pixels, the size the frame is replayed at; [capture]
+  /// renders at that size.
+  ({
+    Size size,
+    double devicePixelRatio,
+    Future<ui.Image> Function(double pixelRatio) capture,
+  })?
+  _captureTarget() {
+    final views = RendererBinding.instance.renderViews;
+    final viewDpr =
+        views.isEmpty ? 1.0 : views.first.configuration.devicePixelRatio;
+    final boundary = _repaintBoundaryFromKey();
+    if (boundary != null && boundary.hasSize) {
+      return (
+        size: boundary.size,
+        devicePixelRatio: viewDpr,
+        capture: (pixelRatio) => boundary.toImage(pixelRatio: pixelRatio),
+      );
+    }
+    if (views.isEmpty) return null;
+    final view = views.first;
+    // The root view is always a repaint boundary, so its layer is the
+    // OffsetLayer (a TransformLayer scaling logical to physical pixels) that
+    // RenderRepaintBoundary.toImage would use. `debugLayer` is null in
+    // release builds, hence the protected getter.
+    // ignore: invalid_use_of_protected_member
+    final layer = view.layer;
+    if (layer is! OffsetLayer || view.size.isEmpty) {
+      return null;
+    }
+    final dpr = view.configuration.devicePixelRatio;
+    final size = view.size;
+    return (
+      size: size,
+      devicePixelRatio: dpr,
+      // Bounds are in the layer's parent space (physical pixels); dividing
+      // by dpr undoes the layer's own dpr transform.
+      capture:
+          (pixelRatio) => layer.toImage(
+            Offset.zero & (size * dpr),
+            pixelRatio: pixelRatio / dpr,
+          ),
+    );
+  }
+
+  /// Captures, optionally masks, downscales and encodes as lossy JPEG.
+  ///
+  /// Returns the JPEG with the boundary's logical size (the size the frame is
+  /// replayed at), or null when an error occurs.
+  Future<({Uint8List jpeg, int width, int height})?>
+  _captureScreenshot() async {
     // ui.Image instances hold native/GPU-backed pixel buffers that are NOT
     // reclaimed by ordinary Dart GC promptly — they must be disposed explicitly
     // or they accumulate (a full-window capture every tick is large, especially
@@ -715,30 +524,20 @@ class MiddlewareScreenshotManager {
     ui.Image? scaledImage;
     ui.Image? maskedImage;
     try {
-      var boundary = _repaintBoundaryFromKey();
-      if (boundary == null) {
+      var target = _captureTarget();
+      if (target == null) {
         await WidgetsBinding.instance.endOfFrame;
         if (_stopped) {
           return null;
         }
-        boundary = _repaintBoundaryFromKey();
+        target = _captureTarget();
       }
 
-      if (boundary == null) {
-        if (kDebugMode) {
-          final ro = repaintBoundaryKey.currentContext?.findRenderObject();
-          if (ro != null) {
-            debugPrint(
-              'Session replay: GlobalKey must be on a RepaintBoundary '
-              '(got ${ro.runtimeType}).',
-            );
-          } else {
-            debugPrint(
-              'Session replay: RepaintBoundary not in tree yet — wrap your '
-              'app (e.g. MaterialApp) with RepaintBoundary(key: '
-              'FlutterOTel.repaintBoundaryKey, child: ...).',
-            );
-          }
+      if (target == null) {
+        if (OTelLog.isDebug()) {
+          OTelLog.debug(
+            'Session replay: nothing rendered yet, skipping frame.',
+          );
         }
         return null;
       }
@@ -750,7 +549,17 @@ class MiddlewareScreenshotManager {
       // ------------------------------------------------------------------
       // 1. Capture at native resolution (pixelRatio 1.0 keeps it manageable)
       // ------------------------------------------------------------------
-      rawImage = await boundary.toImage(pixelRatio: 1.0);
+      // Render just enough pixels for the short side to reach
+      // minShortSidePx (the replay's resolution), up to the screen's real
+      // resolution. 1x logical pixels made text blurry on HiDPI screens.
+      final shortSide = math.min(target.size.width, target.size.height);
+      final pixelRatio =
+          shortSide <= 0
+              ? 1.0
+              : (builder.recordingOptions.minShortSidePx / shortSide)
+                  .clamp(1.0, math.max(1.0, target.devicePixelRatio))
+                  .toDouble();
+      rawImage = await target.capture(pixelRatio);
 
       if (_stopped) {
         return null;
@@ -788,8 +597,10 @@ class MiddlewareScreenshotManager {
       // 4. Encode as lossy JPEG (off UI thread: background isolate on native,
       //    browser-native canvas encoder on web).
       // ------------------------------------------------------------------
-      if (kDebugMode) {
-        debugPrint(
+      // Per-frame diagnostics: only with SDK debug logging on, since at two
+      // frames a second they flood the console of every debug build.
+      if (OTelLog.isDebug()) {
+        OTelLog.debug(
           'Session replay: encoding JPEG with quality=${builder.recordingOptions.qualityValue} '
           'minShortSidePx=${builder.recordingOptions.minShortSidePx}',
         );
@@ -810,15 +621,19 @@ class MiddlewareScreenshotManager {
         quality: builder.recordingOptions.qualityValue,
       );
 
-      if (kDebugMode) {
-        debugPrint(
+      if (OTelLog.isDebug()) {
+        OTelLog.debug(
           'Session replay: frame accepted '
           '(${maskedImage.width}×${maskedImage.height}, '
           '${jpegBytes.length} bytes JPEG)',
         );
       }
 
-      return jpegBytes;
+      return (
+        jpeg: jpegBytes,
+        width: target.size.width.round(),
+        height: target.size.height.round(),
+      );
     } catch (e) {
       debugPrint('Error capturing screenshot: $e');
       return null;
@@ -861,8 +676,8 @@ class MiddlewareScreenshotManager {
       newW = (newH * w / h).round().clamp(1, 1 << 15);
     }
 
-    if (kDebugMode) {
-      debugPrint('Session replay: scaling $w×$h → $newW×$newH');
+    if (OTelLog.isDebug()) {
+      OTelLog.debug('Session replay: scaling $w×$h → $newW×$newH');
     }
 
     final recorder = ui.PictureRecorder();
@@ -991,189 +806,15 @@ class MiddlewareScreenshotManager {
   }
 
   // -------------------------------------------------------------------------
-  // File I/O
-  // -------------------------------------------------------------------------
-
-  /// Bundles all pending screenshots into a single `.tar.gz` archive stored via
-  /// [_storage], then removes the source screenshots. Works identically on
-  /// native (filesystem) and web (in-memory) since it operates purely through
-  /// the [RecordingStorage] abstraction.
-  Future<void> _archiveScreenshots() async {
-    final storage = _storage;
-    if (storage == null) return;
-    try {
-      final screenshots = await storage.screenshotNames();
-      if (screenshots.isEmpty) return;
-
-      // Sort by name — names are millisecond timestamps so lexicographic order
-      // == chronological order.
-      screenshots.sort();
-
-      // FIX #7 — Set lastTs once from the last (most-recent) file after sort,
-      // matching Java's `lastTs = getNameWithoutExtension(screenshots[last])`.
-      // Previously lastTs was overwritten in the loop body on every iteration;
-      // the end result was identical but the intent was unclear.
-      _lastTs = _nameWithoutExtension(screenshots.last);
-
-      final archive = Archive();
-      final archived = <String>[];
-      for (final name in screenshots) {
-        // FIX #7 — Read the screenshot bytes once. The archive library requires
-        // the full bytes for in-memory archiving; streaming is not exposed by
-        // the `archive` package's Archive/ArchiveFile API.  The IO cost is
-        // acceptable given the small frame sizes (< 30 KB each at default
-        // quality settings).
-        final bytes = await storage.readScreenshot(name);
-        if (bytes == null) continue;
-        final filename = '${_firstTs}_1_${_nameWithoutExtension(name)}.jpeg';
-        archive.addFile(ArchiveFile(filename, bytes.length, bytes));
-        archived.add(name);
-      }
-      if (archived.isEmpty) return;
-
-      final tarEncoder = TarEncoder();
-      final tarData = tarEncoder.encode(archive);
-      final gzipData = GZipEncoder().encode(tarData);
-
-      await storage.writeArchive(
-        '$sessionId-$_lastTs.tar.gz',
-        Uint8List.fromList(gzipData),
-      );
-
-      for (final name in archived) {
-        await storage.deleteScreenshot(name);
-      }
-    } catch (e) {
-      debugPrint('Error archiving folder: $e');
-    }
-  }
-
-  /// FIX #2 — Upload all pending archives concurrently (fire-and-forget per
-  /// archive), matching the Java SDK which submits every archive to the network
-  /// without awaiting each one before starting the next.
-  ///
-  /// Each archive's delete-on-success / log-on-error callback still runs
-  /// individually. We collect all Futures and await them together so the
-  /// serialized-IO chain does not release until all uploads for this batch
-  /// have settled.
-  Future<void> sendScreenshots() async {
-    if (sessionId.isEmpty) {
-      debugPrint('SessionId is empty');
-      return;
-    }
-
-    final nm = _networkManager;
-    if (nm == null) return;
-    final storage = _storage;
-    if (storage == null) return;
-
-    try {
-      final archives = await storage.archiveNames();
-
-      if (archives.isEmpty) {
-        if (kDebugMode) debugPrint('No archives to upload');
-        return;
-      }
-
-      // Launch all uploads concurrently — one Future per archive.
-      final uploadFutures = <Future<bool>>[];
-      for (final archive in archives) {
-        uploadFutures.add(_uploadArchive(nm, archive));
-      }
-
-      final results = await Future.wait(uploadFutures);
-      final successCount = results.where((r) => r).length;
-      final failCount = results.length - successCount;
-
-      if (kDebugMode) {
-        debugPrint(
-          'Upload summary: $successCount succeeded, $failCount failed',
-        );
-      }
-    } catch (e) {
-      debugPrint('Error sending screenshot archives: $e');
-    }
-  }
-
-  /// Uploads a single archive (by [fileName]) and returns true on success.
-  Future<bool> _uploadArchive(NetworkManager nm, String fileName) async {
-    final storage = _storage;
-    if (storage == null) return false;
-    try {
-      final imageData = await storage.readArchive(fileName);
-      if (imageData == null) return false;
-      final completer = Completer<bool>();
-
-      final uploadSessionId = _sessionIdFromArchiveFileName(
-        fileName,
-        sessionId,
-      );
-      await nm.sendImages(
-        uploadSessionId,
-        _rumResourceAttributesJson(),
-        imageData,
-        fileName,
-        _NetworkCallbackImpl(
-          onSuccessCallback: (response) async {
-            final deleted = await storage.deleteArchive(fileName);
-            completer.complete(deleted);
-          },
-          onErrorCallback: (e) {
-            if (kDebugMode) debugPrint('Upload failed for $fileName: $e');
-            completer.complete(false);
-          },
-        ),
-      );
-      return await completer.future;
-    } catch (e) {
-      if (kDebugMode) debugPrint('Error processing archive: $e');
-      return false;
-    }
-  }
-
-  // -------------------------------------------------------------------------
   // Misc helpers
   // -------------------------------------------------------------------------
 
   void setViewForBlur(GlobalKey key) => _sanitizedElements.add(key);
 
   void removeSanitizedElement(GlobalKey key) => _sanitizedElements.remove(key);
-
-  void _checkAndReportOrientationChange() {
-    final context = repaintBoundaryKey.currentContext;
-    if (context == null) return;
-    final orientation = MediaQuery.of(context).orientation;
-    if (orientation != _lastOrientation) {
-      _lastOrientation = orientation;
-      debugPrint('Current orientation: $orientation');
-    }
-  }
-
-  String _nameWithoutExtension(String name) {
-    final lastDot = name.lastIndexOf('.');
-    return lastDot > 0 ? name.substring(0, lastDot) : name;
-  }
 }
 
 // ---------------------------------------------------------------------------
-
-/// Network callback implementation
-class _NetworkCallbackImpl implements NetworkCallback {
-  final void Function(String) onSuccessCallback;
-  final void Function(Exception) onErrorCallback;
-
-  _NetworkCallbackImpl({
-    required this.onSuccessCallback,
-    required this.onErrorCallback,
-  });
-
-  @override
-  void onSuccess(String response) => onSuccessCallback(response);
-
-  @override
-  void onError(Exception error) => onErrorCallback(error);
-}
-
 /// Widget wrapper with RepaintBoundary for screenshot capture
 class ScreenshotRecordingWrapper extends StatefulWidget {
   final Widget child;

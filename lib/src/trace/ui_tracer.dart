@@ -80,7 +80,7 @@ class UITracer implements sdk.Tracer {
       print('Tracer: Creating span with name: $name, kind: $kind');
     }
 
-    var delegateSpan = createSpan(
+    final delegateSpan = _delegate.createSpan(
       name: name,
       spanContext: spanContext,
       parentSpan: parentSpan,
@@ -112,22 +112,25 @@ class UITracer implements sdk.Tracer {
     bool? isRecording = true,
     Context? context,
   }) {
-    if (kDebugMode) {
-      print('Tracer: Creating span with name: $name, kind: $kind');
+    if (OTelLog.isDebug()) {
+      OTelLog.debug('Tracer: Creating span with name: $name, kind: $kind');
     }
 
-    return _delegate.createSpan(
-          name: name,
-          spanContext: spanContext,
-          parentSpan: parentSpan,
-          kind: kind,
-          attributes: attributes,
-          links: links,
-          startTime: startTime,
-          spanEvents: spanEvents,
-          isRecording: isRecording,
-        )
-        as UISpan;
+    // The delegate returns a plain SDK span; it has to be wrapped (a cast to
+    // UISpan always threw).
+    final delegateSpan = _delegate.createSpan(
+      name: name,
+      spanContext: spanContext,
+      parentSpan: parentSpan,
+      kind: kind,
+      attributes: attributes,
+      links: links,
+      startTime: startTime,
+      spanEvents: spanEvents,
+      isRecording: isRecording,
+      context: context,
+    );
+    return UISpanCreate.create(delegateSpan: delegateSpan, uiSpanType: null);
   }
 
   @override
@@ -248,19 +251,21 @@ class UITracer implements sdk.Tracer {
   }
 
   /// Creates and immediately ends a span for a user interaction
-  void recordUserInteraction(
+  /// Returns the (already ended) span, or null when the tracer is disabled.
+  sdk.Span? recordUserInteraction(
     String screenName,
     api.OTelSemantic interactionType, {
     String? targetName,
     Duration? responseTime,
     Attributes? attributes,
+    String? spanName,
   }) {
     if (!enabled) {
-      return;
+      return null;
     }
     FlutterOTel.notifyUserSessionActivity();
 
-    final spanName = 'interaction.$screenName.$interactionType';
+    spanName ??= 'interaction.$screenName.$interactionType';
     actionCount++;
     var interactionAttributes =
         <String, Object>{
@@ -293,6 +298,7 @@ class UITracer implements sdk.Tracer {
     } else {
       span.end();
     }
+    return span;
   }
 
   /// Records an error within the current context

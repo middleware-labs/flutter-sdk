@@ -1,6 +1,6 @@
 name: middleware_flutter_opentelemetry
 description: "A Flutter package for OpenTelemetry based on middleware_dart_opentelemetry"
-version: 2.0.2
+version: 2.1.0
 homepage: https://middleware.io
 repository: https://github.com/middleware-labs/flutter-sdk.git
 
@@ -22,8 +22,6 @@ dependencies:
   meta: ^1.16.0
   uuid: ^4.5.1
   web: ^1.1.1
-  archive: ^4.0.7
-  path_provider: ^2.1.5
   image: ^4.2.0
 
 dev_dependencies:

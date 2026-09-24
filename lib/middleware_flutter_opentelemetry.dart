@@ -20,6 +20,7 @@ export 'src/trace/ui_tracer.dart';
 export 'src/trace/ui_tracer_provider.dart';
 export 'src/session/session_manager.dart';
 export 'src/instrumentation/user_interaction_instrumentation.dart';
+export 'src/web/web_instrumentation_options.dart';
 
 // Session-replay configuration. Only the public config types are exported;
 // the internal capture/upload machinery stays private to the package.

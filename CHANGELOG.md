@@ -1,5 +1,86 @@
 # Changelog
 
+## Unreleased
+
+- Flutter web browser instrumentation, matching the Middleware browser SDK:
+  document load and resource timings, `fetch` / `XMLHttpRequest` spans with
+  trace-header propagation, Core Web Vitals (LCP, FCP, CLS, INP, TTFB), long
+  tasks, page views / page leave, JS errors and console capture, WebSocket
+  spans, rage clicks, tap-to-request attribution, and bot-traffic blocking.
+  Configure with `FlutterOTel.initialize(webInstrumentation: ...)`; on by
+  default on the web, no effect on other platforms.
+- Everything is on by default, so `initialize` with an endpoint and account
+  key is the whole setup:
+  - `autoCaptureErrors` now defaults to `true`. `reportError` records an error
+    object once even when both the SDK handler and an app handler (chained)
+    report it.
+  - `enableAutomaticUserInteractions` now defaults to `true`.
+  - `WebInstrumentationOptions.websocket` now defaults to `true`.
+  - The Dart session recorder (web, desktop) starts by itself after the first
+    frame, and captures the whole root view when the app has no
+    `RepaintBoundary(key: FlutterOTel.repaintBoundaryKey)`. Calling
+    `startSessionRecording()` or wrapping the app is no longer needed;
+    `stopSessionRecording()` before the first frame keeps it off.
+- Taps now appear on the RUM heatmap. Bifrost shows Flutter apps (web
+  included) with the mobile heatmap, which reads `event.type=tap` spans with
+  `screen.name`; Flutter sent `click` and no screen name, so no tap ever
+  showed. Auto-captured taps now carry the native SDKs' tap shape on every
+  platform (`event.type=tap`, `component=ui`, `screen.name`, logical-pixel
+  coordinates and viewport, `target.class` / `target.text`) and a
+  `target_xpath` unique per control (widget position path + string key),
+  since the heatmap draws one point per xpath. Span names are
+  `tap on 'Label'`. Rage clicks are detected on every platform.
+- Routes without `settings.name` (common with GoRouter pages) are named after
+  the router location (or web page path) instead of the Navigator's
+  `toString()`, which is minified in release web builds
+  (`Widget-[<optimized out>…]`) and named replay and heatmap screens.
+- `enableMetrics` now defaults to `false`: the Flutter metrics exporter,
+  reader and collectors are only created when you opt in.
+- Session replay on web and desktop uses the native SDKs' standard quality:
+  JPEG quality 50 (was 10), a 640 px short edge (was 320) captured at up to
+  the device pixel ratio instead of 1x logical pixels, one frame a second
+  (was two). Replays were visibly blurry.
+- On the web the `os` resource attribute is the real OS (`Mac OS`,
+  `Windows`, ...), as the browser SDK reports it, instead of `web`.
+- Fixed a feedback loop on the web: Dart `print` / `debugPrint` writes to
+  `console.log`, so console capture recorded the SDK's own diagnostics (e.g.
+  `OTelLog.spanLogFunction = debugPrint` dumping every exported span) as new
+  spans and logs, which the next export printed again, continuously. Dart
+  output now goes to the original `console.log` through the `dartPrint` hook
+  every web compiler honours, so only JavaScript console calls are captured.
+- Performance:
+  - Tap handling no longer walks the whole widget tree on every pointer down
+    and up (quadratic in release builds). Targets are found with a pruned
+    lookup along the path under the pointer, and swipe detection runs only
+    when a pan actually happens.
+  - Tapped controls are matched by type, so detection and `target_element`
+    work in release web builds, where class names are minified.
+  - The Dart recorder skips capture, GPU readback and JPEG encoding when
+    Flutter rendered no frame since the last capture.
+  - Per-frame recorder diagnostics print only with `OTelLog` debug logging.
+  - `flutter run` debug artifacts (`*.dart.lib.js`, `dart_sdk.js`, dwds) are
+    not reported as resources.
+- Fixed `UISpan.end` ignoring `endTime` and `spanStatus`: spans ended with an
+  explicit end time (`recordUserInteraction` with a `responseTime`,
+  `recordPerformanceMetric`, navigation durations) were recorded as ending
+  when `end` was called.
+- Fixed `UITracer.createSpan` throwing a cast error.
+- `UITracer.recordUserInteraction` now returns the recorded span.
+
+## 2.1.0
+
+- Fixed web session replay: web sessions had no playable recording. The Dart
+  recorder (web and desktop) still uploaded JPEG tarballs to `/v1/rum`, which
+  the backend turns into a video event that the Middleware session player
+  ignores. It now emits the same rrweb stream as the native SDKs and the
+  browser SDK (`rum_event` metrics to `/v1/metrics`): a full snapshot per
+  session / viewport size / return to foreground, an image mutation per
+  changed frame (identical frames are skipped), taps, and route names on the
+  replay timeline.
+- Deprecated `RecordingOptions.archiveChunkSize`, `staleArchiveMaxAge`,
+  `staleScreenshotMaxAge` and `uploadStaleFilesOnStart`; they have no effect.
+- Removed the unused `archive` and `path_provider` dependencies.
+
 ## 2.0.2
 
 - Fixed Android session replay: Android sessions recorded nothing. Two causes:

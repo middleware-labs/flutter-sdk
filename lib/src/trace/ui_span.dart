@@ -34,7 +34,8 @@ class UISpan implements Span {
   Resource? get resource => _delegate.resource;
 
   @override
-  void end({DateTime? endTime, SpanStatusCode? spanStatus}) => _delegate.end();
+  void end({DateTime? endTime, SpanStatusCode? spanStatus}) =>
+      _delegate.end(endTime: endTime, spanStatus: spanStatus);
 
   @override
   set attributes(Attributes newAttributes) =>

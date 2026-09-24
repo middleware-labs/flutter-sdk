@@ -3,11 +3,14 @@
 import 'dart:async';
 
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../flutterrific_otel.dart';
+import '../web/web_instrumentation.dart';
+import '../web/web_utils.dart' show RageClickDetector;
 
 /// Cardinal direction for scroll / swipe auto-capture (string values match
 /// [InteractionType.gestureDirection] usage elsewhere in this SDK).
@@ -114,13 +117,13 @@ class AutomaticUserInteractionTracker {
   }
 
   void _handlePointerDown(PointerDownEvent event) {
-    final isSwipe = _isSwipeContext(event.position);
+    // Nothing is looked up here: pointer down is the hot path, and whether
+    // the gesture is a swipe only matters once it turns out to be a pan.
     _pointerStates[event.pointer] = _PointerState(
       startPosition: event.position,
       startTime: event.timeStamp,
       lastPosition: event.position,
       lastTime: event.timeStamp,
-      isSwipeContext: isSwipe,
     );
   }
 
@@ -150,14 +153,19 @@ class AutomaticUserInteractionTracker {
       _reportTap(
         targetElement: widgetInfo.targetElement,
         elementClasses: widgetInfo.widgetClassName,
+        xpath: widgetInfo.xpath,
         innerText: innerText,
         x: event.position.dx,
         y: event.position.dy,
+        pointerKind: event.kind,
+        downAt: state.downAt,
       );
     } else {
       final direction = _directionFromDisplacement(dx, dy);
       final type =
-          state.isSwipeContext ? InteractionType.swipe : InteractionType.scroll;
+          _isSwipeContext(state.startPosition)
+              ? InteractionType.swipe
+              : InteractionType.scroll;
       _reportPan(interactionType: type, direction: direction);
     }
   }
@@ -175,7 +183,7 @@ class AutomaticUserInteractionTracker {
       if (displacement >= tapThreshold) {
         final direction = _directionFromDisplacement(dx, dy);
         final type =
-            state.isSwipeContext
+            _isSwipeContext(state.startPosition)
                 ? InteractionType.swipe
                 : InteractionType.scroll;
         _reportPan(interactionType: type, direction: direction);
@@ -196,23 +204,11 @@ class AutomaticUserInteractionTracker {
 
   bool _isSwipeContext(Offset position) {
     try {
-      final checked = <Element>{};
-      final elements = _findElementsAtPosition(position);
-      for (final element in elements) {
-        if (checked.contains(element)) {
-          continue;
-        }
-        checked.add(element);
-        var found = false;
-        element.visitAncestorElements((ancestor) {
-          final w = ancestor.widget;
-          if (w is PageView || w is Dismissible || w is TabBarView) {
-            found = true;
-            return false;
-          }
-          return true;
-        });
-        if (found) {
+      final hits = _elementsAtPosition(position);
+      if (hits.isEmpty) return false;
+      for (final element in _selfAndAncestors(hits.first)) {
+        final w = element.widget;
+        if (w is PageView || w is Dismissible || w is TabBarView) {
           return true;
         }
       }
@@ -222,31 +218,86 @@ class AutomaticUserInteractionTracker {
     return false;
   }
 
+  /// Rapid repeated taps on one spot (4 within 30 px and 1 s), as in the
+  /// browser SDK.
+  final RageClickDetector _rageClicks = RageClickDetector();
+
+  /// Records a tap in the shape the RUM heatmap reads for mobile apps (the
+  /// native Android/iOS SDKs emit the same): `event.type=tap`, `screen.name`,
+  /// logical-pixel coordinates with the viewport size (they line up with the
+  /// replay frames), and a `target_xpath` unique per control, since the
+  /// heatmap draws one point per distinct xpath.
   void _reportTap({
     required String targetElement,
     required String elementClasses,
+    required String xpath,
     String? innerText,
     required double x,
     required double y,
+    PointerDeviceKind? pointerKind,
+    DateTime? downAt,
   }) {
+    // Taken synchronously so rage-click timing reflects the real tap cadence.
+    final route = _screenName();
+    final rage =
+        WebInstrumentation.rageClickEnabled && _rageClicks.isRageClick(x, y);
+    Size? viewport;
+    try {
+      final view = WidgetsBinding.instance.platformDispatcher.views.first;
+      viewport = view.physicalSize / view.devicePixelRatio;
+    } catch (_) {}
+    final label =
+        innerText == null ? 'tap on $targetElement' : "tap on '$innerText'";
     unawaited(
       _report(() {
-        final route = FlutterOTel.currentInteractionRouteName;
         final attrs = <String, Object>{
+          'event.type': 'tap',
+          'component': 'ui',
+          'screen.name': route,
+          'x': x,
+          'y': y,
+          'pageX': x,
+          'pageY': y,
+          if (viewport != null) 'viewport.width': viewport.width,
+          if (viewport != null) 'viewport.height': viewport.height,
+          'target_xpath':
+              '/${route.startsWith('/') ? route.substring(1) : route}$xpath',
+          'target_element': targetElement,
+          'target.class': targetElement,
+          if (innerText != null) 'target.text': innerText,
+          'pointer.type': switch (pointerKind) {
+            PointerDeviceKind.touch => 'touch',
+            PointerDeviceKind.stylus ||
+            PointerDeviceKind.invertedStylus => 'pen',
+            _ => 'mouse',
+          },
+          if (rage) 'frustration.type': 'rage_click',
+          // Kept for existing queries.
           'ui.auto.capture': true,
           'ui.auto.x': x,
           'ui.auto.y': y,
           'ui.auto.widget_class': elementClasses,
           if (innerText != null) 'ui.auto.target_text': innerText,
         };
-        FlutterOTel.tracer.recordUserInteraction(
+        final span = FlutterOTel.tracer.recordUserInteraction(
           route,
           InteractionType.click,
           targetName: targetElement,
           attributes: attrs.toAttributes(),
+          spanName: label,
         );
+        WebInstrumentation.onInteraction(span, label, startedAt: downAt);
       }),
     );
+  }
+
+  /// The screen a tap belongs to: the route from `FlutterOTel.routeObserver`,
+  /// or on the web the page path (hash routes included) when the app has no
+  /// observer.
+  static String _screenName() {
+    final route = FlutterOTel.currentInteractionRouteName;
+    if (route != 'unknown_route') return route;
+    return WebInstrumentation.pagePath ?? route;
   }
 
   void _reportPan({
@@ -279,104 +330,73 @@ class AutomaticUserInteractionTracker {
 
   _WidgetInfo _extractWidgetInfo(Offset position) {
     try {
-      final hitTestResult = HitTestResult();
-      _hitTestAt(position, hitTestResult);
-
-      final allHitElements = <Element>[];
-      for (final entry in hitTestResult.path) {
-        final target = entry.target;
-        if (target is RenderObject) {
-          final debugCreator = target.debugCreator;
-          if (debugCreator is DebugCreator) {
-            allHitElements.add(debugCreator.element);
-          }
-        }
-      }
-
-      if (allHitElements.isEmpty) {
-        final fallback = _findElementsAtPosition(position);
-        allHitElements.addAll(fallback);
-      }
-
-      Element? bestInteractive;
-      Element? genericFallback;
-
-      for (var i = 0; i < allHitElements.length; i++) {
-        final element = allHitElements[i];
-        var current = element;
-        while (true) {
-          final className = current.widget.runtimeType.toString();
-          final cleanName =
-              className.startsWith('_') ? className.substring(1) : className;
-          final isDetecting =
-              _isDetectingElement(className) ||
-              _isDetectingElement(cleanName) ||
-              _isButtonWidget(current.widget);
-
-          if (isDetecting) {
-            if (_isGenericGestureWidget(className)) {
-              genericFallback ??= current;
-            } else {
-              bestInteractive = current;
+      // Debug builds can map the real hit-test path back to elements, which
+      // respects IgnorePointer / hit-test behaviour. Release builds have no
+      // RenderObject -> Element link, so a pruned geometric lookup is used.
+      Element? deepest;
+      if (kDebugMode) {
+        final hitTestResult = HitTestResult();
+        _hitTestAt(position, hitTestResult);
+        for (final entry in hitTestResult.path) {
+          final target = entry.target;
+          if (target is RenderObject) {
+            final creator = target.debugCreator;
+            if (creator is DebugCreator) {
+              deepest = creator.element;
               break;
             }
           }
-          Element? parent;
-          current.visitAncestorElements((ancestor) {
-            parent = ancestor;
-            return false;
-          });
-          if (parent == null) {
-            break;
-          }
-          current = parent!;
-        }
-        if (bestInteractive != null) {
-          break;
         }
       }
-
-      if (bestInteractive == null && allHitElements.isNotEmpty) {
-        final firstWidget = allHitElements.first.widget;
-        if (firstWidget is Listener) {
-          bestInteractive = _findDialogContentAtPosition(position);
-        }
+      List<Element>? hits;
+      if (deepest == null) {
+        hits = _elementsAtPosition(position);
+        if (hits.isNotEmpty) deepest = hits.first;
       }
-
-      bestInteractive ??= genericFallback;
-      final deepest =
-          bestInteractive ??
-          (allHitElements.isEmpty ? null : allHitElements.first);
-
       if (deepest == null) {
         return _WidgetInfo(targetElement: 'Screen', widgetClassName: 'Screen');
       }
 
-      String? elementClassName;
-      if (bestInteractive != null) {
-        final raw = bestInteractive.widget.runtimeType.toString();
-        elementClassName = raw.startsWith('_') ? raw.substring(1) : raw;
+      // One upward scan from the deepest element: the nearest specific
+      // control wins; a bare GestureDetector/InkWell is the fallback.
+      Element? bestInteractive;
+      Element? genericFallback;
+      for (final element in _selfAndAncestors(deepest)) {
+        final widget = element.widget;
+        if (!_isInteractive(widget)) continue;
+        if (_isGenericGesture(widget)) {
+          genericFallback ??= element;
+        } else {
+          bestInteractive = element;
+          break;
+        }
       }
+
+      // A barrier Listener on top (dialogs) hides the control under it: pick
+      // the smallest control at the point instead.
+      if (bestInteractive == null && deepest.widget is Listener) {
+        hits ??= _elementsAtPosition(position);
+        bestInteractive = _smallestInteractive(hits);
+      }
+      bestInteractive ??= genericFallback;
+
+      final elementClassName =
+          bestInteractive == null ? null : _widgetName(bestInteractive.widget);
 
       String? textContent;
       String? semanticsLabel;
-
       if (bestInteractive != null) {
         textContent = _findTextInChildren(bestInteractive);
       }
-
       if (textContent == null) {
-        var current = deepest;
-        while (true) {
-          final widget = current.widget;
-          if (textContent == null) {
-            if (widget is Text) {
-              textContent = _nonEmpty(
-                widget.data ?? widget.textSpan?.toPlainText(),
-              );
-            } else if (widget is RichText) {
-              textContent = _nonEmpty(widget.text.toPlainText());
-            }
+        for (final element in _selfAndAncestors(deepest)) {
+          final widget = element.widget;
+          if (widget is Text) {
+            textContent = _nonEmpty(
+              widget.data ?? widget.textSpan?.toPlainText(),
+            );
+          } else if (widget is RichText) {
+            textContent = _nonEmpty(widget.text.toPlainText());
           }
           if (semanticsLabel == null) {
             if (widget is Semantics) {
@@ -387,18 +407,7 @@ class AutomaticUserInteractionTracker {
               semanticsLabel = _nonEmpty(widget.message);
             }
           }
-          if (textContent != null) {
-            break;
-          }
-          Element? parent;
-          current.visitAncestorElements((ancestor) {
-            parent = ancestor;
-            return false;
-          });
-          if (parent == null) {
-            break;
-          }
-          current = parent!;
+          if (textContent != null) break;
         }
       }
 
@@ -408,6 +417,10 @@ class AutomaticUserInteractionTracker {
         text: textContent,
         accessibilityLabel: semanticsLabel,
         widgetClassName: targetElement,
+        xpath:
+            bestInteractive == null
+                ? '/Screen'
+                : _xpathOf(bestInteractive, targetElement),
       );
     } catch (e) {
       _log('Error extracting widget info: $e');
@@ -416,77 +429,150 @@ class AutomaticUserInteractionTracker {
     return _WidgetInfo(targetElement: 'Screen', widgetClassName: 'Screen');
   }
 
-  bool _isDetectingElement(String className) {
-    const detecting = <String>{
-      'Button',
-      'ElevatedButton',
-      'TextButton',
-      'OutlinedButton',
-      'FilledButton',
-      'IconButton',
-      'FloatingActionButton',
-      'PopupMenuButton',
-      'DropdownButton',
-      'ButtonStyleButton',
-      'Card',
-      'ListTile',
-      'Tab',
-      'Chip',
-      'Dismissible',
-      'Switch',
-      'Checkbox',
-      'Radio',
-      'Slider',
-      'BottomNavigationBar',
-      'NavigationRail',
-      'TabBar',
-      'AlertDialog',
-      'Dialog',
-      'SimpleDialog',
-      'InkWell',
-      'GestureDetector',
-      'InkResponse',
-    };
-    return detecting.contains(className);
+  /// [element] followed by its ancestors up to the root.
+  static Iterable<Element> _selfAndAncestors(Element element) sync* {
+    yield element;
+    final ancestors = <Element>[];
+    element.visitAncestorElements((ancestor) {
+      ancestors.add(ancestor);
+      return true;
+    });
+    yield* ancestors;
   }
 
-  bool _isButtonWidget(Widget widget) {
-    return widget is ElevatedButton ||
-        widget is TextButton ||
-        widget is OutlinedButton ||
-        widget is FilledButton ||
-        widget is IconButton ||
-        widget is FloatingActionButton ||
-        widget is PopupMenuButton ||
-        widget is DropdownButton ||
-        widget is BackButton ||
-        widget is CloseButton ||
-        widget is ButtonStyleButton;
+  /// Name of a known control. Matched by type, not by `runtimeType.toString()`,
+  /// which is minified in release web builds (`minified:uh`).
+  static String? _knownWidgetName(Widget w) => switch (w) {
+    ElevatedButton() => 'ElevatedButton',
+    FilledButton() => 'FilledButton',
+    OutlinedButton() => 'OutlinedButton',
+    TextButton() => 'TextButton',
+    ButtonStyleButton() => 'ButtonStyleButton',
+    // Back/CloseButton are IconButtons: match them first.
+    BackButton() => 'BackButton',
+    CloseButton() => 'CloseButton',
+    IconButton() => 'IconButton',
+    FloatingActionButton() => 'FloatingActionButton',
+    PopupMenuButton() => 'PopupMenuButton',
+    DropdownButton() => 'DropdownButton',
+    Card() => 'Card',
+    ListTile() => 'ListTile',
+    Tab() => 'Tab',
+    Chip() ||
+    ActionChip() ||
+    ChoiceChip() ||
+    FilterChip() ||
+    InputChip() => 'Chip',
+    Dismissible() => 'Dismissible',
+    Switch() => 'Switch',
+    Checkbox() => 'Checkbox',
+    Radio() => 'Radio',
+    Slider() => 'Slider',
+    BottomNavigationBar() => 'BottomNavigationBar',
+    NavigationBar() => 'NavigationBar',
+    NavigationRail() => 'NavigationRail',
+    TabBar() => 'TabBar',
+    AlertDialog() => 'AlertDialog',
+    SimpleDialog() => 'SimpleDialog',
+    Dialog() => 'Dialog',
+    InkWell() => 'InkWell',
+    InkResponse() => 'InkResponse',
+    GestureDetector() => 'GestureDetector',
+    _ => null,
+  };
+
+  static bool _isInteractive(Widget w) => _knownWidgetName(w) != null;
+
+  static bool _isGenericGesture(Widget w) =>
+      w is InkResponse || w is GestureDetector;
+
+  static String _widgetName(Widget w) {
+    final known = _knownWidgetName(w);
+    if (known != null) return known;
+    final raw = w.runtimeType.toString();
+    return raw.startsWith('_') ? raw.substring(1) : raw;
   }
 
-  bool _isGenericGestureWidget(String className) {
-    const generic = {'GestureDetector', 'InkWell', 'InkResponse'};
-    return generic.contains(className);
-  }
+  static const int _maxXPathSegments = 8;
 
-  List<Element> _findElementsAtPosition(Offset position) {
-    final elementsAtPosition = <Element>[];
-    void visitor(Element element) {
-      final ro = element.renderObject;
-      if (ro is RenderBox && ro.attached) {
-        try {
-          final local = ro.globalToLocal(position);
-          if (ro.paintBounds.contains(local)) {
-            elementsAtPosition.add(element);
-          }
-        } catch (_) {}
+  /// A path that tells controls on one screen apart: the control's position
+  /// among its siblings at each point where the tree branches (single-child
+  /// wrappers such as Padding add nothing and are skipped), nearest
+  /// [_maxXPathSegments] levels, plus its string key when it has one.
+  /// Segment names are real widget names only for known controls; others are
+  /// `*`, because release builds minify class names and a name that changes
+  /// every build would split the heatmap across versions.
+  static String _xpathOf(Element target, String targetName) {
+    final key = target.widget.key;
+    final keySuffix =
+        key is ValueKey<String>
+            ? '#${key.value}'
+            : (key is ValueKey<int> ? '#${key.value}' : '');
+    final segments = <String>[];
+    Element child = target;
+    var first = true;
+    for (final parent in _selfAndAncestors(target).skip(1)) {
+      if (segments.length >= _maxXPathSegments) break;
+      final siblings = <Element>[];
+      parent.visitChildren(siblings.add);
+      if (first || siblings.length > 1) {
+        final name =
+            first
+                ? '$targetName$keySuffix'
+                : (_knownWidgetName(child.widget) ?? '*');
+        final index = siblings.indexWhere((e) => identical(e, child));
+        segments.add('$name[${index < 0 ? 0 : index}]');
+        first = false;
       }
-      element.visitChildren(visitor);
+      child = parent;
+    }
+    return '/${segments.reversed.join('/')}';
+  }
+
+  Element? _smallestInteractive(List<Element> hits) {
+    Element? best;
+    var bestArea = double.infinity;
+    for (final element in hits) {
+      final widget = element.widget;
+      if (!_isInteractive(widget) || _isGenericGesture(widget)) continue;
+      final ro = element.renderObject;
+      if (ro is! RenderBox || !ro.hasSize) continue;
+      final area = ro.size.width * ro.size.height;
+      if (area < bestArea) {
+        bestArea = area;
+        best = element;
+      }
+    }
+    return best;
+  }
+
+  /// Elements whose box contains [position], deepest (and topmost) first.
+  ///
+  /// Subtrees whose box doesn't contain the point are skipped, so the cost is
+  /// the path to the point plus its siblings instead of the whole tree; the
+  /// containment test runs once per render object, not once per element.
+  List<Element> _elementsAtPosition(Offset position) {
+    final hits = <Element>[];
+    void visit(Element element, RenderObject? checked) {
+      final ro = element.renderObject;
+      if (ro is RenderBox && !identical(ro, checked)) {
+        if (!ro.attached || !ro.hasSize) return;
+        try {
+          if (!(Offset.zero & ro.size).contains(ro.globalToLocal(position))) {
+            return;
+          }
+        } catch (_) {
+          return;
+        }
+      }
+      if (ro is RenderBox) hits.add(element);
+      element.visitChildren((child) => visit(child, ro));
     }
 
-    final root = WidgetsBinding.instance.rootElement;
-    root?.visitChildren(visitor);
-    return elementsAtPosition;
+    WidgetsBinding.instance.rootElement?.visitChildren(
+      (child) => visit(child, null),
+    );
+    return hits.reversed.toList(growable: false);
   }
 
   void _hitTestAt(Offset position, HitTestResult result) {
@@ -547,56 +633,6 @@ class AutomaticUserInteractionTracker {
     element.visitChildren(search);
     return foundText;
   }
-
-  Element? _findDialogContentAtPosition(Offset position) {
-    try {
-      final root = WidgetsBinding.instance.rootElement;
-      if (root == null) {
-        return null;
-      }
-      Element? bestMatch;
-      var bestArea = double.infinity;
-
-      void searchElement(Element element) {
-        final ro = element.renderObject;
-        if (ro is RenderBox && ro.hasSize) {
-          try {
-            final transform = ro.getTransformTo(null);
-            final bounds = MatrixUtils.transformRect(
-              transform,
-              Offset.zero & ro.size,
-            );
-            if (bounds.contains(position)) {
-              final widget = element.widget;
-              final className = widget.runtimeType.toString();
-              final cleanName =
-                  className.startsWith('_')
-                      ? className.substring(1)
-                      : className;
-              final isInteractive =
-                  _isDetectingElement(className) ||
-                  _isDetectingElement(cleanName) ||
-                  _isButtonWidget(widget);
-              if (isInteractive && !_isGenericGestureWidget(className)) {
-                final area = bounds.width * bounds.height;
-                if (area < bestArea) {
-                  bestArea = area;
-                  bestMatch = element;
-                }
-              }
-            }
-          } catch (_) {}
-        }
-        element.visitChildren(searchElement);
-      }
-
-      searchElement(root);
-      return bestMatch;
-    } catch (e) {
-      _log('Error finding dialog content: $e');
-      return null;
-    }
-  }
 }
 
 class _WidgetInfo {
@@ -605,9 +641,14 @@ class _WidgetInfo {
     this.text,
     this.accessibilityLabel,
     this.widgetClassName = 'Unknown',
+    this.xpath = '/Screen',
   });
 
   final String targetElement;
+
+  /// Widget path of the tapped control below the screen, e.g.
+  /// `/Column[1]/Row[0]/IconButton[1]`.
+  final String xpath;
   final String? text;
   final String? accessibilityLabel;
   final String widgetClassName;
@@ -619,7 +660,6 @@ class _PointerState {
     required this.startTime,
     required this.lastPosition,
     required this.lastTime,
-    this.isSwipeContext = false,
   });
 
   final Offset startPosition;
@@ -627,5 +667,9 @@ class _PointerState {
   Offset lastPosition;
   Duration lastTime;
   bool hasMoved = false;
-  final bool isSwipeContext;
+
+  /// Wall-clock time of the pointer down. Tap handlers run before this
+  /// tracker sees the pointer up, so requests they fire are attributed from
+  /// here.
+  final DateTime downAt = DateTime.now();
 }
