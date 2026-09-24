@@ -48,9 +48,11 @@ void main() {
         isFalse,
       );
       expect(
-        shouldPropagateTraceHeaders('https://api.other.com/x', 'https://app.test', [
-          RegExp(r'api\.other\.com'),
-        ]),
+        shouldPropagateTraceHeaders(
+          'https://api.other.com/x',
+          'https://app.test',
+          [RegExp(r'api\.other\.com')],
+        ),
         isTrue,
       );
     });
@@ -88,9 +90,18 @@ void main() {
     });
 
     test('provider', () {
-      expect(computeResourceProviderType('https://app.test/a', 'app.test'), 'first-party');
-      expect(computeResourceProviderType('https://cdn.x.com/a', 'app.test'), 'cdn');
-      expect(computeResourceProviderType('https://www.gstatic.com/a', 'app.test'), 'other');
+      expect(
+        computeResourceProviderType('https://app.test/a', 'app.test'),
+        'first-party',
+      );
+      expect(
+        computeResourceProviderType('https://cdn.x.com/a', 'app.test'),
+        'cdn',
+      );
+      expect(
+        computeResourceProviderType('https://www.gstatic.com/a', 'app.test'),
+        'other',
+      );
     });
   });
 
@@ -124,7 +135,11 @@ void main() {
 
     test('hidden cross-origin timings are not turned into durations', () {
       final attrs = resourceTimingAttributes(
-        const ResourceTimingData(startTime: 100, fetchStart: 100, responseEnd: 180),
+        const ResourceTimingData(
+          startTime: 100,
+          fetchStart: 100,
+          responseEnd: 180,
+        ),
       );
       expect(attrs['resource.timing_visible'], isFalse);
       expect(attrs['resource.duration'], 80);
@@ -156,8 +171,14 @@ void main() {
 
     test('os', () {
       expect(browserOs('MacIntel', chrome), 'Mac OS');
-      expect(browserOs('Linux armv8l', 'Mozilla/5.0 (Linux; Android 14)'), 'Android');
-      expect(browserOs('', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'), 'Windows');
+      expect(
+        browserOs('Linux armv8l', 'Mozilla/5.0 (Linux; Android 14)'),
+        'Android',
+      );
+      expect(
+        browserOs('', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'),
+        'Windows',
+      );
       expect(browserOs('', chrome), 'Mac OS');
     });
 
@@ -218,17 +239,50 @@ void main() {
     final detector = RageClickDetector();
     final t = DateTime(2026);
     expect(detector.isRageClick(10, 10, now: t), isFalse);
-    expect(detector.isRageClick(12, 10, now: t.add(const Duration(milliseconds: 100))), isFalse);
-    expect(detector.isRageClick(14, 10, now: t.add(const Duration(milliseconds: 200))), isFalse);
-    expect(detector.isRageClick(16, 10, now: t.add(const Duration(milliseconds: 300))), isTrue);
+    expect(
+      detector.isRageClick(
+        12,
+        10,
+        now: t.add(const Duration(milliseconds: 100)),
+      ),
+      isFalse,
+    );
+    expect(
+      detector.isRageClick(
+        14,
+        10,
+        now: t.add(const Duration(milliseconds: 200)),
+      ),
+      isFalse,
+    );
+    expect(
+      detector.isRageClick(
+        16,
+        10,
+        now: t.add(const Duration(milliseconds: 300)),
+      ),
+      isTrue,
+    );
     // A far-away click starts over.
-    expect(detector.isRageClick(500, 500, now: t.add(const Duration(milliseconds: 400))), isFalse);
+    expect(
+      detector.isRageClick(
+        500,
+        500,
+        now: t.add(const Duration(milliseconds: 400)),
+      ),
+      isFalse,
+    );
   });
 
   test('interaction attribution window', () {
     InteractionContext.clear();
     final t = DateTime(2026);
-    InteractionContext.setActiveInteraction('t1', 's1', name: 'click on x', startedAt: t);
+    InteractionContext.setActiveInteraction(
+      't1',
+      's1',
+      name: 'click on x',
+      startedAt: t,
+    );
     expect(
       InteractionContext.attributesAt(t.add(const Duration(milliseconds: 500))),
       {
@@ -237,7 +291,10 @@ void main() {
         'interaction.name': 'click on x',
       },
     );
-    expect(InteractionContext.attributesAt(t.add(const Duration(seconds: 2))), isEmpty);
+    expect(
+      InteractionContext.attributesAt(t.add(const Duration(seconds: 2))),
+      isEmpty,
+    );
     InteractionContext.clear();
   });
 

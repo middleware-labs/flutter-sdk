@@ -35,7 +35,8 @@ final RegExp _serverTimingTraceparent = RegExp(
 /// click attribution and (opt-in) header/body capture.
 class NetworkInstrumentation {
   NetworkInstrumentation({required this.options, required this.ignoreUrls})
-    : _ignoreHeaders = options.ignoreHeaders.map((h) => h.toLowerCase()).toSet();
+    : _ignoreHeaders =
+          options.ignoreHeaders.map((h) => h.toLowerCase()).toSet();
 
   final WebInstrumentationOptions options;
   final List<Pattern> ignoreUrls;
@@ -218,11 +219,15 @@ class NetworkInstrumentation {
       final list = jsArgs(args);
       final input = list.isEmpty ? null : list[0];
       JSAny? init = list.length > 1 ? list[1] : null;
-      JSAny? callOriginal() => reflectApply(original, thisArg, [
-        input,
-        if (init != null || list.length > 1) init,
-        ...list.skip(2),
-      ].toJS);
+      JSAny? callOriginal() => reflectApply(
+        original,
+        thisArg,
+        [
+          input,
+          if (init != null || list.length > 1) init,
+          ...list.skip(2),
+        ].toJS,
+      );
       String url;
       var method = 'GET';
       final isRequest = jsInstanceOf(input, 'Request');
@@ -386,31 +391,34 @@ class NetworkInstrumentation {
           _captureHeader(attrs, 'response', name, value);
         });
         _captureServerTiming(attrs, _getHeader(headers, 'server-timing'));
-        final contentType = (_getHeader(headers, 'content-type') ?? '')
-            .split(';')
-            .first
-            .trim()
-            .toLowerCase();
+        final contentType =
+            (_getHeader(headers, 'content-type') ?? '')
+                .split(';')
+                .first
+                .trim()
+                .toLowerCase();
         if (_capturableContentTypes.contains(contentType)) {
           bodyPending = true;
-          _readFetchBody(res).then((text) {
-            if (text != null && text.trim().isNotEmpty) {
-              attrs['http.response.body'] = limitLen(
-                text.trim(),
-                messageLimit * 8,
-              );
-            }
-          }).whenComplete(() {
-            WebTelemetry.setAttributes(span, attrs);
-            _finish(
-              span,
-              url: url,
-              startPerf: startPerf,
-              endPerf: endPerf,
-              endTime: endTime,
-              initiatorType: 'fetch',
-            );
-          });
+          _readFetchBody(res)
+              .then((text) {
+                if (text != null && text.trim().isNotEmpty) {
+                  attrs['http.response.body'] = limitLen(
+                    text.trim(),
+                    messageLimit * 8,
+                  );
+                }
+              })
+              .whenComplete(() {
+                WebTelemetry.setAttributes(span, attrs);
+                _finish(
+                  span,
+                  url: url,
+                  startPerf: startPerf,
+                  endPerf: endPerf,
+                  endTime: endTime,
+                  initiatorType: 'fetch',
+                );
+              });
         }
       }
     }
@@ -575,8 +583,7 @@ class NetworkInstrumentation {
 
   void _captureXhrResponse(JSObject xhr, Map<String, Object> attrs) {
     try {
-      final raw =
-          xhr.callMethod<JSString>('getAllResponseHeaders'.toJS).toDart;
+      final raw = xhr.callMethod<JSString>('getAllResponseHeaders'.toJS).toDart;
       for (final line in raw.split(RegExp(r'[\r\n]+'))) {
         final idx = line.indexOf(': ');
         if (idx <= 0) continue;

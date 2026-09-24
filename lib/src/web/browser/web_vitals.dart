@@ -271,7 +271,11 @@ class WebVitalsInstrumentation {
       final sources = jsList(jsGet(e, 'sources'));
       final target =
           sources.isEmpty ? null : describeNode(jsGet(sources.first, 'node'));
-      if (_cls.add(jsNum0(e, 'value'), jsNum0(e, 'startTime'), target: target)) {
+      if (_cls.add(
+        jsNum0(e, 'value'),
+        jsNum0(e, 'startTime'),
+        target: target,
+      )) {
         _clsEntries.add(e);
       }
     }

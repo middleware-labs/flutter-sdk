@@ -137,9 +137,10 @@ class ErrorsConsoleInstrumentation {
   void _onRejection(JSObject event) {
     final reason = jsGet(event, 'reason');
     if (reason == null) return;
-    final text = reason.isA<JSObject>()
-        ? (jsStr(reason as JSObject, 'message') ?? jsToString(reason))
-        : jsToString(reason);
+    final text =
+        reason.isA<JSObject>()
+            ? (jsStr(reason as JSObject, 'message') ?? jsToString(reason))
+            : jsToString(reason);
     if (shouldIgnoreMessage(text)) return;
     _guard(() => _reportError('unhandledRejection', reason));
   }
@@ -148,7 +149,8 @@ class ErrorsConsoleInstrumentation {
     final target = jsObj(event, 'target');
     final tag = jsStr(target, 'tagName');
     if (target == null || tag == null) return;
-    final src = jsStr(target, 'src') ??
+    final src =
+        jsStr(target, 'src') ??
         jsStr(target, 'href') ??
         jsStr(jsObj(target, 'href'), 'baseVal');
     if (shouldIgnoreMessage(src)) return;
@@ -327,8 +329,9 @@ class ErrorsConsoleInstrumentation {
   String _boundedStringify(JSObject root, int budget) {
     final JSObject seen;
     try {
-      seen = (globalContext['WeakSet'] as JSFunction)
-          .callAsConstructor<JSObject>();
+      seen =
+          (globalContext['WeakSet'] as JSFunction)
+              .callAsConstructor<JSObject>();
     } catch (_) {
       return jsToString(root);
     }
@@ -358,8 +361,7 @@ class ErrorsConsoleInstrumentation {
       }
       seen.callMethod<JSAny?>('add'.toJS, o);
       if (depth >= 4) return write('"[Object]"');
-      final isArray =
-          arrayCtor.callMethod<JSBoolean>('isArray'.toJS, o).toDart;
+      final isArray = arrayCtor.callMethod<JSBoolean>('isArray'.toJS, o).toDart;
       final keys =
           objectCtor.callMethod<JSArray<JSString>>('keys'.toJS, o).toDart;
       write(isArray ? '[' : '{');

@@ -14,9 +14,7 @@ const _scope = '@middleware.io/page-tracking-instrumentation';
 /// make every screen the same page, so a `#/` fragment is kept.
 String currentPagePath() {
   final hash = jsStr(jsLocation, 'hash') ?? '';
-  return hash.startsWith('#/')
-      ? '$locationPathname$hash'
-      : locationPathname;
+  return hash.startsWith('#/') ? '$locationPathname$hash' : locationPathname;
 }
 
 /// Port of the browser SDK's page tracking: a `pageview` span whenever the

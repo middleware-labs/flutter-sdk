@@ -225,12 +225,7 @@ class ResourceTimingData {
 
 bool _isPositive(num? v) => v != null && v > 0;
 
-void _setPhase(
-  Map<String, Object> out,
-  String name,
-  double start,
-  double end,
-) {
+void _setPhase(Map<String, Object> out, String name, double start, double end) {
   if (_isPositive(start) && end >= start) out[name] = end - start;
 }
 
@@ -284,12 +279,7 @@ Map<String, Object> resourceTimingAttributes(ResourceTimingData r) {
     r.requestStart,
     r.responseStart,
   );
-  _setPhase(
-    out,
-    'resource.download.duration',
-    r.responseStart,
-    r.responseEnd,
-  );
+  _setPhase(out, 'resource.download.duration', r.responseStart, r.responseEnd);
   // No TLS handshake / no redirect is a true zero, not a missing value.
   if (_isPositive(r.secureConnectionStart)) {
     _setPhase(
@@ -333,7 +323,9 @@ final RegExp _botUserAgent = RegExp(
 
 /// True for crawler / headless / monitoring user agents.
 bool isBotUserAgent(String? userAgent) =>
-    userAgent != null && userAgent.isNotEmpty && _botUserAgent.hasMatch(userAgent);
+    userAgent != null &&
+    userAgent.isNotEmpty &&
+    _botUserAgent.hasMatch(userAgent);
 
 const List<(String, String)> _browsers = [
   ('UCBrowser', r'(ucbrowser)'),
@@ -407,16 +399,17 @@ bool isUsefulMessage(String? s) =>
 // ---------------------------------------------------------------------------
 
 /// `largestShiftTarget` -> `largest_shift_target`.
-String toSnakeCase(String key) => key
-    .replaceAllMapped(
-      RegExp(r'([a-z0-9])([A-Z])'),
-      (m) => '${m[1]}_${m[2]}',
-    )
-    .replaceAllMapped(
-      RegExp(r'([A-Z]+)([A-Z][a-z])'),
-      (m) => '${m[1]}_${m[2]}',
-    )
-    .toLowerCase();
+String toSnakeCase(String key) =>
+    key
+        .replaceAllMapped(
+          RegExp(r'([a-z0-9])([A-Z])'),
+          (m) => '${m[1]}_${m[2]}',
+        )
+        .replaceAllMapped(
+          RegExp(r'([A-Z]+)([A-Z][a-z])'),
+          (m) => '${m[1]}_${m[2]}',
+        )
+        .toLowerCase();
 
 /// `good` / `needs-improvement` / `poor`, using the web-vitals thresholds.
 String webVitalRating(String metric, num value) {
@@ -502,8 +495,8 @@ class InpAccumulator {
   /// The interaction INP is currently reporting, or null when none happened.
   InpInteraction? get worst {
     if (_byId.isEmpty) return null;
-    final sorted = _byId.values.toList()
-      ..sort((a, b) => b.duration.compareTo(a.duration));
+    final sorted =
+        _byId.values.toList()..sort((a, b) => b.duration.compareTo(a.duration));
     final skip = math.min(sorted.length - 1, interactionCount ~/ 50);
     return sorted[skip];
   }
@@ -645,7 +638,10 @@ class InteractionContext {
 // JS stack parsing (port of error-stack-parser, V8 + Firefox/Safari)
 // ---------------------------------------------------------------------------
 
-final RegExp _chromeStack = RegExp(r'^\s*at .*(\S+:\d+|\(native\))', multiLine: true);
+final RegExp _chromeStack = RegExp(
+  r'^\s*at .*(\S+:\d+|\(native\))',
+  multiLine: true,
+);
 final RegExp _safariNative = RegExp(r'^(eval@)?(\[native code])?$');
 
 List<String?> _extractLocation(String urlLike) {
@@ -693,7 +689,9 @@ List<Map<String, Object>> parseJsStack(String? stack) {
       if (location != null) {
         sanitized = sanitized.replaceFirst(location[0]!, '');
       }
-      final parts = _extractLocation(location != null ? location[1]! : sanitized);
+      final parts = _extractLocation(
+        location != null ? location[1]! : sanitized,
+      );
       final fileName =
           const ['eval', '<anonymous>'].contains(parts[0]) ? null : parts[0];
       return _frame(
@@ -705,48 +703,45 @@ List<Map<String, Object>> parseJsStack(String? stack) {
       );
     }).toList();
   }
-  return stack
-      .split('\n')
-      .where((l) => !_safariNative.hasMatch(l))
-      .map((raw) {
-        var line = raw;
-        if (line.contains(' > eval')) {
-          line = line.replaceAllMapped(
-            RegExp(r' line (\d+)(?: > eval line \d+)* > eval:\d+:\d+'),
-            (m) => ':${m[1]}',
-          );
-        }
-        if (!line.contains('@') && !line.contains(':')) {
-          return _frame(functionName: line, source: raw);
-        }
-        final fnRegex = RegExp(r'((.*".+"[^@]*)?[^@]*)(?:@)');
-        final m = fnRegex.firstMatch(line);
-        final parts = _extractLocation(line.replaceFirst(fnRegex, ''));
-        return _frame(
-          functionName: m?[1],
-          fileName: parts[0],
-          lineNumber: parts[1],
-          columnNumber: parts[2],
-          source: raw,
-        );
-      })
-      .toList();
+  return stack.split('\n').where((l) => !_safariNative.hasMatch(l)).map((raw) {
+    var line = raw;
+    if (line.contains(' > eval')) {
+      line = line.replaceAllMapped(
+        RegExp(r' line (\d+)(?: > eval line \d+)* > eval:\d+:\d+'),
+        (m) => ':${m[1]}',
+      );
+    }
+    if (!line.contains('@') && !line.contains(':')) {
+      return _frame(functionName: line, source: raw);
+    }
+    final fnRegex = RegExp(r'((.*".+"[^@]*)?[^@]*)(?:@)');
+    final m = fnRegex.firstMatch(line);
+    final parts = _extractLocation(line.replaceFirst(fnRegex, ''));
+    return _frame(
+      functionName: m?[1],
+      fileName: parts[0],
+      lineNumber: parts[1],
+      columnNumber: parts[2],
+      source: raw,
+    );
+  }).toList();
 }
 
 /// `exception.stack_details` payload derived from parsed frames.
 List<Map<String, Object?>> exceptionStackFrames(
   List<Map<String, Object>> frames,
-) => frames
-    .map(
-      (f) => <String, Object?>{
-        'exception.line': f['lineNumber'],
-        'exception.function_name': f['functionName'],
-        'exception.function_body': f['source'],
-        'exception.column_number': f['columnNumber'],
-        'exception.file': f['fileName'],
-      },
-    )
-    .toList();
+) =>
+    frames
+        .map(
+          (f) => <String, Object?>{
+            'exception.line': f['lineNumber'],
+            'exception.function_name': f['functionName'],
+            'exception.function_body': f['source'],
+            'exception.column_number': f['columnNumber'],
+            'exception.file': f['fileName'],
+          },
+        )
+        .toList();
 
 /// JSON-encodes [value], never throwing.
 String safeJson(Object? value) {

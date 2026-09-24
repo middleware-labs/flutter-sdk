@@ -159,16 +159,18 @@ Disposer listen(
   bool passive = true,
 }) {
   if (target == null) return () {};
-  final handler = ((JSObject event) {
-    try {
-      fn(event);
-    } catch (_) {
-      // instrumentation must never break the page
-    }
-  }).toJS;
-  final options = JSObject()
-    ..setProperty('capture'.toJS, capture.toJS)
-    ..setProperty('passive'.toJS, passive.toJS);
+  final handler =
+      ((JSObject event) {
+        try {
+          fn(event);
+        } catch (_) {
+          // instrumentation must never break the page
+        }
+      }).toJS;
+  final options =
+      JSObject()
+        ..setProperty('capture'.toJS, capture.toJS)
+        ..setProperty('passive'.toJS, passive.toJS);
   try {
     target.callMethod<JSAny?>(
       'addEventListener'.toJS,
@@ -218,15 +220,17 @@ Disposer observePerformance(
     return () {};
   }
   try {
-    final callback = ((JSObject list, JSAny? _) {
-      try {
-        onEntries(jsList(list.callMethod<JSAny?>('getEntries'.toJS)));
-      } catch (_) {}
-    }).toJS;
+    final callback =
+        ((JSObject list, JSAny? _) {
+          try {
+            onEntries(jsList(list.callMethod<JSAny?>('getEntries'.toJS)));
+          } catch (_) {}
+        }).toJS;
     final observer = (ctor as JSFunction).callAsConstructor<JSObject>(callback);
-    final init = JSObject()
-      ..setProperty('type'.toJS, type.toJS)
-      ..setProperty('buffered'.toJS, buffered.toJS);
+    final init =
+        JSObject()
+          ..setProperty('type'.toJS, type.toJS)
+          ..setProperty('buffered'.toJS, buffered.toJS);
     if (durationThreshold != null) {
       init.setProperty('durationThreshold'.toJS, durationThreshold.toJS);
     }
@@ -291,14 +295,14 @@ List<JSAny?> jsArgs(JSArray<JSAny?> args) => args.toDart;
 /// A callable proxy of [target] whose calls go through [trap].
 JSObject proxyApply(
   JSFunction target,
-  JSAny? Function(JSFunction target, JSAny? thisArg, JSArray<JSAny?> args)
-  trap,
+  JSAny? Function(JSFunction target, JSAny? thisArg, JSArray<JSAny?> args) trap,
 ) {
   final handler =
       JSObject()..setProperty(
         'apply'.toJS,
         ((JSFunction t, JSAny? thisArg, JSArray<JSAny?> args) =>
-            trap(t, thisArg, args)).toJS,
+                trap(t, thisArg, args))
+            .toJS,
       );
   return (globalContext['Proxy'] as JSFunction).callAsConstructor<JSObject>(
     target,
@@ -316,7 +320,8 @@ JSObject proxyConstruct(
       JSObject()..setProperty(
         'construct'.toJS,
         ((JSFunction t, JSArray<JSAny?> args, JSAny? newTarget) =>
-            trap(t, args, newTarget)).toJS,
+                trap(t, args, newTarget))
+            .toJS,
       );
   return (globalContext['Proxy'] as JSFunction).callAsConstructor<JSObject>(
     target,

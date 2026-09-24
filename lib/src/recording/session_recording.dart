@@ -500,10 +500,11 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
       devicePixelRatio: dpr,
       // Bounds are in the layer's parent space (physical pixels); dividing
       // by dpr undoes the layer's own dpr transform.
-      capture: (pixelRatio) => layer.toImage(
-        Offset.zero & (size * dpr),
-        pixelRatio: pixelRatio / dpr,
-      ),
+      capture:
+          (pixelRatio) => layer.toImage(
+            Offset.zero & (size * dpr),
+            pixelRatio: pixelRatio / dpr,
+          ),
     );
   }
 
@@ -534,7 +535,9 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
 
       if (target == null) {
         if (OTelLog.isDebug()) {
-          OTelLog.debug('Session replay: nothing rendered yet, skipping frame.');
+          OTelLog.debug(
+            'Session replay: nothing rendered yet, skipping frame.',
+          );
         }
         return null;
       }

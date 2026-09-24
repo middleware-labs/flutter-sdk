@@ -147,7 +147,9 @@ class DocumentLoadInstrumentation {
       for (final entry in performanceEntriesByType('resource')) {
         final r = resourceTimingOf(entry);
         final postLoad =
-            loadEventEnd != null && loadEventEnd > 0 && r.startTime > loadEventEnd;
+            loadEventEnd != null &&
+            loadEventEnd > 0 &&
+            r.startTime > loadEventEnd;
         _reportResource(entry, origin, parent: postLoad ? null : root);
       }
 
@@ -245,7 +247,8 @@ class DocumentLoadInstrumentation {
     final w = jsNum(screen, 'width');
     final h = jsNum(screen, 'height');
     return {
-      if (referrer != null && referrer.isNotEmpty) 'document.referrer': referrer,
+      if (referrer != null && referrer.isNotEmpty)
+        'document.referrer': referrer,
       if (w != null && h != null) 'screen.xy': '${w.toInt()}x${h.toInt()}',
     };
   }

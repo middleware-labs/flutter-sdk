@@ -69,9 +69,7 @@ class WebSocketInstrumentation {
           'protocols':
               protocols.isA<JSString>()
                   ? (protocols as JSString).toDart
-                  : safeJson(
-                    (protocols as JSObject).dartify(),
-                  ),
+                  : safeJson((protocols as JSObject).dartify()),
       },
     );
     final JSObject ws;
@@ -144,8 +142,8 @@ class WebSocketInstrumentation {
   void _patchMessageListeners(JSObject ws) {
     // Keyed by the listener's JS identity (a Dart map can't key JS values
     // reliably across compilers).
-    final wrapped = (globalContext['WeakMap'] as JSFunction)
-        .callAsConstructor<JSObject>();
+    final wrapped =
+        (globalContext['WeakMap'] as JSFunction).callAsConstructor<JSObject>();
     JSFunction wrap(JSAny callback) {
       return ((JSAny? event) {
         final span = _span(ws, 'onmessage', SpanKind.consumer);
@@ -184,11 +182,11 @@ class WebSocketInstrumentation {
         patched = wrap(callback);
         wrapped.callMethod<JSAny?>('set'.toJS, callback, patched);
       }
-      return reflectApply(original, thisArg, [
-        list[0],
-        patched,
-        if (list.length > 2) list[2],
-      ].toJS);
+      return reflectApply(
+        original,
+        thisArg,
+        [list[0], patched, if (list.length > 2) list[2]].toJS,
+      );
     });
     patchMethod(ws, 'removeEventListener', (original, thisArg, args) {
       final list = jsArgs(args);
@@ -200,11 +198,11 @@ class WebSocketInstrumentation {
               ? wrapped.callMethod<JSAny?>('get'.toJS, list[1])
               : null;
       if (patched != null) {
-        return reflectApply(original, thisArg, [
-          list[0],
-          patched,
-          if (list.length > 2) list[2],
-        ].toJS);
+        return reflectApply(
+          original,
+          thisArg,
+          [list[0], patched, if (list.length > 2) list[2]].toJS,
+        );
       }
       return reflectApply(original, thisArg, args);
     });
