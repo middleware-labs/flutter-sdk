@@ -27,6 +27,9 @@ Map<String, Object> browserResourceAttributes() {
     'navigator.userAgent': ua,
     'origin': locationOrigin,
     'rum_origin': locationOrigin,
+    // `os` is what RUM shows as the session's OS. It was the literal "web";
+    // report the real one, like the browser SDK does.
+    if (os != null) 'os': os,
     if (os != null) 'os.name': os,
   };
 }
@@ -36,7 +39,6 @@ final List<void Function()> _active = [];
 void enable(
   WebInstrumentationOptions options, {
   required List<Pattern> ignoreUrls,
-  required bool captureConsoleLog,
 }) {
   disable();
   if (!options.enabled) return;
@@ -56,10 +58,7 @@ void enable(
   }
 
   // Errors first, so failures in the other instrumentations are captured.
-  final errors = ErrorsConsoleInstrumentation(
-    options: options,
-    captureConsoleLog: captureConsoleLog,
-  );
+  final errors = ErrorsConsoleInstrumentation(options: options);
   start(options.errors || options.console, errors.enable, errors.disable);
 
   final network = NetworkInstrumentation(

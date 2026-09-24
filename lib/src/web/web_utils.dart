@@ -79,6 +79,10 @@ final List<RegExp> defaultIgnoredUrls = <RegExp>[
   RegExp(r'/v1/metrics', caseSensitive: false),
   RegExp(r'/v1/traces', caseSensitive: false),
   RegExp(r'/v1/logs', caseSensitive: false),
+  // `flutter run` (debug) loads every Dart library as its own script and
+  // talks to the dev server; that's hundreds of resources per page load that
+  // no release build has.
+  RegExp(r'\.dart\.lib\.js(\?|$)|\.ddc\.js(\?|$)|/dart_sdk\.js(\?|$)|\$dwds'),
 ];
 
 /// Whether trace headers should be injected into a request to [url] made from
@@ -367,6 +371,14 @@ String? browserOs(String platform, String userAgent) {
   if (win.contains(platform)) return 'Windows';
   if (userAgent.contains('Android')) return 'Android';
   if (platform.contains('Linux')) return 'Linux';
+  // navigator.platform is deprecated and empty in some browsers: fall back
+  // to the user agent.
+  if (platform.isEmpty) {
+    if (RegExp(r'iPhone|iPad|iPod').hasMatch(userAgent)) return 'iOS';
+    if (userAgent.contains('Windows')) return 'Windows';
+    if (userAgent.contains('Mac OS X')) return 'Mac OS';
+    if (RegExp(r'Linux|CrOS').hasMatch(userAgent)) return 'Linux';
+  }
   return null;
 }
 

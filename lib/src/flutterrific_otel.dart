@@ -403,13 +403,15 @@ class FlutterOTel {
     double? sessionSamplingRatio,
     // Installs FlutterError.onError + PlatformDispatcher.onError handlers
     // that call reportError, chaining any previously-installed handlers.
-    bool autoCaptureErrors = false,
+    bool autoCaptureErrors = true,
     // Metrics configuration
     MetricExporter? metricExporter,
     MetricReader? metricReader,
-    bool enableMetrics = true,
+    // Off by default: RUM needs traces, logs and replay; Flutter metrics
+    // (frame timings, APDEX, ...) are an extra export stream.
+    bool enableMetrics = false,
     RecordingOptions recordingOptions = const RecordingOptions(),
-    bool enableAutomaticUserInteractions = false,
+    bool enableAutomaticUserInteractions = true,
     double automaticUserInteractionTapThreshold = 20,
     bool automaticUserInteractionDebug = false,
     // Logs configuration
@@ -598,7 +600,7 @@ class FlutterOTel {
     }
 
     // Create platform-specific metric exporters if not provided
-    if (metricExporter == null) {
+    if (enableMetrics && metricExporter == null) {
       // Web platform must use HTTP
       if (OTelLog.isDebug()) {
         OTelLog.debug('Creating HTTP metric exporter for web platform');
@@ -626,10 +628,12 @@ class FlutterOTel {
       }
     }
 
-    metricReader ??= PeriodicExportingMetricReader(
-      metricExporter,
-      interval: Duration(seconds: 1), // Export every second
-    );
+    if (enableMetrics && metricExporter != null) {
+      metricReader ??= PeriodicExportingMetricReader(
+        metricExporter,
+        interval: Duration(seconds: 1), // Export every second
+      );
+    }
 
     // Create log exporters if logs enabled and not provided. HTTP on every
     // platform: the gRPC exporter defaults to port 4317 for https endpoints
@@ -737,9 +741,11 @@ class FlutterOTel {
 
     // Initialize OTel metrics bridge
     // This connects Flutter metrics to OpenTelemetry
-    FlutterOTelMetrics.metricReporter.initialize();
-    if (kDebugMode) {
-      MetricsService.debugPrintMetricsStatus();
+    if (enableMetrics) {
+      FlutterOTelMetrics.metricReporter.initialize();
+      if (kDebugMode) {
+        MetricsService.debugPrintMetricsStatus();
+      }
     }
 
     //TODO - move down to Dartastic but make Dartastic default to null
@@ -758,12 +764,22 @@ class FlutterOTel {
       });
     }
 
-    if (!blockedBot) {
-      WebInstrumentation.enable(
-        webInstrumentation,
-        // On the web `print` writes to console.log; don't capture it twice.
-        captureConsoleLog: !logPrint,
+    // The Dart recorder (web, desktop) starts by itself; it captures the root
+    // view unless the app provides FlutterOTel.repaintBoundaryKey.
+    _recordingStoppedByApp = false;
+    if (_screenshotManager != null) {
+      unawaited(
+        WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) {
+          if (!_recordingStoppedByApp &&
+              !(_screenshotManager?.isRunning ?? true)) {
+            return startSessionRecording();
+          }
+        }),
       );
+    }
+
+    if (!blockedBot) {
+      WebInstrumentation.enable(webInstrumentation);
     }
 
     if (enableAutomaticUserInteractions) {
@@ -862,6 +878,7 @@ class FlutterOTel {
   /// On the native path the stop is sticky: it survives session rotation and
   /// sampler re-evaluation until [startSessionRecording] is called.
   static Future<void> stopSessionRecording() async {
+    _recordingStoppedByApp = true;
     if (_nativeSdkActive && _screenshotManager == null) {
       final stopped = await MiddlewareNativeBridge.stopRecording();
       if (stopped == true) {
@@ -1149,6 +1166,13 @@ class FlutterOTel {
         .record(duration.inMilliseconds, navAttributes.toAttributes());
   }
 
+  /// Set once the app stops recording, so the automatic start after the
+  /// first frame doesn't override it.
+  static bool _recordingStoppedByApp = false;
+
+  static Object? _lastReportedError;
+  static DateTime _lastReportedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   /// Records an error within the current context
   static void reportError(
     String message,
@@ -1164,6 +1188,16 @@ class FlutterOTel {
         return; //cannot, too early
       }
       if (!tracer.enabled) return;
+      // autoCaptureErrors chains to handlers the app installed itself, which
+      // often call reportError too: report each error object once.
+      final now = DateTime.now();
+      if (error != null &&
+          identical(error, _lastReportedError) &&
+          now.difference(_lastReportedAt) < const Duration(seconds: 1)) {
+        return;
+      }
+      _lastReportedError = error;
+      _lastReportedAt = now;
       _sessionManager?.incrementErrorCounter();
 
       // Create attribute map

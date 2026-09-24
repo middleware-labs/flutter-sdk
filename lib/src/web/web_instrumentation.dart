@@ -29,10 +29,7 @@ class WebInstrumentation {
   static Map<String, Object> resourceAttributes() =>
       kIsWeb ? impl.browserResourceAttributes() : const {};
 
-  static void enable(
-    WebInstrumentationOptions options, {
-    required bool captureConsoleLog,
-  }) {
+  static void enable(WebInstrumentationOptions options) {
     if (!kIsWeb) return;
     _options = options;
     _rageClick = options.rageClick ? RageClickDetector() : null;
@@ -40,7 +37,6 @@ class WebInstrumentation {
     impl.enable(
       options,
       ignoreUrls: <Pattern>[...defaultIgnoredUrls, ...options.ignoreUrls],
-      captureConsoleLog: captureConsoleLog,
     );
   }
 

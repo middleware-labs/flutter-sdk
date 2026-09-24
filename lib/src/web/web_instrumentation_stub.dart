@@ -11,7 +11,6 @@ Map<String, Object> browserResourceAttributes() => const {};
 void enable(
   WebInstrumentationOptions options, {
   required List<Pattern> ignoreUrls,
-  required bool captureConsoleLog,
 }) {}
 
 void disable() {}

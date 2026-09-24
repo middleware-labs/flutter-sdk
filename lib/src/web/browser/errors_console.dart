@@ -28,17 +28,15 @@ import 'js_helpers.dart';
 /// Dart errors caught by Flutter (`FlutterError.onError`,
 /// `PlatformDispatcher.onError`) are covered by `autoCaptureErrors`; this adds
 /// what never reaches Dart: JS libraries, interop and resource failures.
+///
+/// Dart's own `print` / `debugPrint` output is deliberately *not* captured:
+/// it includes the SDK's diagnostics (e.g. `OTelLog.spanLogFunction` dumping
+/// every exported span), and capturing that turns each export into new spans
+/// that the next export prints again, forever. See [_routeDartPrint].
 class ErrorsConsoleInstrumentation {
-  ErrorsConsoleInstrumentation({
-    required this.options,
-    this.captureConsoleLog = true,
-  });
+  ErrorsConsoleInstrumentation({required this.options});
 
   final WebInstrumentationOptions options;
-
-  /// False when Dart `print` is already captured (`logPrint`), since on the
-  /// web `print` writes to `console.log`.
-  final bool captureConsoleLog;
 
   final List<Disposer> _disposers = [];
 
@@ -51,6 +49,8 @@ class ErrorsConsoleInstrumentation {
   int _dropped = 0;
 
   void enable() {
+    // Before console.log is patched, so it binds the original.
+    if (options.console) _routeDartPrint();
     if (options.errors) {
       _disposers.add(listen(jsWindow, 'error', _onErrorEvent));
       _disposers.add(listen(jsWindow, 'unhandledrejection', _onRejection));
@@ -65,11 +65,34 @@ class ErrorsConsoleInstrumentation {
       _wrapConsole('error', null);
     }
     if (options.console) {
-      if (captureConsoleLog) _wrapConsole('log', Severity.INFO);
+      _wrapConsole('log', Severity.INFO);
       _wrapConsole('info', Severity.INFO);
       _wrapConsole('warn', Severity.WARN);
       _wrapConsole('debug', Severity.DEBUG);
     }
+  }
+
+  /// Every web compiler (dart2js, DDC, dart2wasm) sends `print` to
+  /// `globalThis.dartPrint` when it is a function, and to `console.log`
+  /// otherwise. Pointing it at the original, unpatched `console.log` keeps
+  /// Dart output printing exactly as before while bypassing the capture
+  /// entirely: no feedback loop, and no per-print cost. (Dart prints are
+  /// captured as logs on every platform with `logPrint` instead.)
+  void _routeDartPrint() {
+    if (jsGet(jsWindow, 'dartPrint') != null) return; // the page routes it
+    final console = jsObj(jsWindow, 'console');
+    final log = jsGet(console, 'log');
+    if (console == null || log == null || !log.isA<JSFunction>()) return;
+    final original = (log as JSFunction).callMethod<JSAny?>(
+      'bind'.toJS,
+      console,
+    );
+    jsWindow.setProperty('dartPrint'.toJS, original);
+    _disposers.add(() {
+      try {
+        jsWindow.delete('dartPrint'.toJS);
+      } catch (_) {}
+    });
   }
 
   void disable() {

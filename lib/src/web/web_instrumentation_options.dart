@@ -16,8 +16,8 @@ enum TracePropagationFormat {
 /// SDK (`@middleware.io/browser`). Ignored on every other platform.
 ///
 /// Pass it to `FlutterOTel.initialize(webInstrumentation: ...)`. Every
-/// instrumentation is on by default except [websocket] and
-/// [advanceNetworkCapture], matching the browser SDK's defaults.
+/// instrumentation is on by default except [advanceNetworkCapture], which
+/// records request/response headers and bodies (credentials, personal data).
 class WebInstrumentationOptions {
   const WebInstrumentationOptions({
     this.enabled = true,
@@ -34,7 +34,7 @@ class WebInstrumentationOptions {
     this.errors = true,
     this.console = true,
     this.consoleRateLimit = 100,
-    this.websocket = false,
+    this.websocket = true,
     this.rageClick = true,
     this.blockBotTraffic = true,
   });
@@ -85,14 +85,17 @@ class WebInstrumentationOptions {
   /// and `console.error`, as error spans plus log records.
   final bool errors;
 
-  /// `console.log/info/warn/debug` as log records.
+  /// `console.log/info/warn/debug` calls from JavaScript as log records.
+  /// Dart `print` / `debugPrint` output is never captured here (use
+  /// `logPrint`), which keeps the SDK from capturing its own diagnostics.
   final bool console;
 
   /// Console messages captured per second before the rest are dropped (a
   /// summary record reports how many). 0 disables the limit.
   final int consoleRateLimit;
 
-  /// `WebSocket` connect/send/onmessage spans.
+  /// `WebSocket` connect/send/onmessage spans (off by default in the browser
+  /// SDK; on here).
   final bool websocket;
 
   /// Tag rapid repeated taps with `frustration.type=rage_click` (requires

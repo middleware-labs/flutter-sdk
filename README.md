@@ -57,35 +57,35 @@ dependencies:
 
 ```dart
 import 'package:flutter/material.dart';
-import 'package:middleware_flutter_opentelemetry/flutterrific_otel.dart';
+import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 
-  // Initialize error handling
-  FlutterError.onError = (FlutterErrorDetails details) {
-    FlutterOTel.reportError(
-      'FlutterError.onError', details.exception, details.stack);
-  };
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
 
-  runZonedGuarded(() {
-    // Initialize OpenTelemetry
-    FlutterOTel.initialize(
-      serviceName: 'my-flutter-app',
-      serviceVersion: '1.0.0',
-      tracerName: 'main',
-      middlewareAccountKey: "*****", // Obtain from RUM Flutter installation page
-      endpoint: 'https://<account>.middleware.io',  
-      // Configure your exporter endpoint
-      resourceAttributes: {
-        'env': 'production',
-        'service.namespace': 'mobile-apps',
-      }
-    );
-    
-    runApp(MyApp());
-  }, (error, stack) {
-    FlutterOTel.reportError('Zone Error', error, stack);
-  });
+  await FlutterOTel.initialize(
+    serviceName: 'my-flutter-app',
+    middlewareAccountKey: '*****', // from the RUM Flutter installation page
+    endpoint: 'https://<account>.middleware.io',
+  );
+
+  runApp(MyApp());
 }
 ```
+
+Everything is on by default, with no other code needed:
+
+- Flutter and platform errors (`autoCaptureErrors`, chaining any handlers you
+  already installed; an error reported by both is recorded once)
+- taps, scrolls and swipes (`enableAutomaticUserInteractions`)
+- app lifecycle and logs
+- session replay on every platform: native on Android/iOS, the Dart recorder
+  on web and desktop, which starts by itself after the first frame and
+  captures the whole app
+- on web, the full browser instrumentation (see
+  [Flutter Web Instrumentation](#flutter-web-instrumentation))
+
+Pass `false` to any of these options to turn it off. Flutter metrics (frame
+timings, APDEX, ...) are the one opt-in: `enableMetrics: true`.
 
 ### 3. Add the Route Observer
 
@@ -276,7 +276,7 @@ await FlutterOTel.initialize(
   flushTracesInterval: Duration(seconds: 30),
 
   // Metrics
-  enableMetrics: true,
+  enableMetrics: false,                 // Flutter metrics are opt-in
   metricExporter: null,                 // auto-creates platform-specific exporter
   metricReader: null,                   // auto-creates PeriodicExportingMetricReader
 
@@ -320,12 +320,12 @@ desktop.
 | `longTask` | on | main-thread tasks over 50ms |
 | `pageTracking` | on | `pageview` on URL changes (hash routes included), `pageleave`, `pagehide`; sets `root.url` / `page.href` / `page.title` on all spans |
 | `errors` | on | uncaught JS errors, unhandled rejections, failed resource loads and `console.error`, with parsed JS stacks |
-| `console` | on | `console.log/info/warn/debug` as logs (100/s limit). `console.log` is skipped when `logPrint` is on, since `print` already writes there |
-| `websocket` | off | WebSocket connect / send / onmessage |
-| `rageClick` | on | `frustration.type=rage_click` on auto-captured taps (needs `enableAutomaticUserInteractions`) |
+| `console` | on | `console.log/info/warn/debug` calls from JavaScript as logs (100/s limit). Dart `print` / `debugPrint` output is not captured here (so the SDK never records its own diagnostics); use `logPrint` for that |
+| `websocket` | on | WebSocket connect / send / onmessage |
+| `rageClick` | on | `frustration.type=rage_click` on taps |
 | `blockBotTraffic` | on | no telemetry for crawlers and headless browsers |
 
-With `enableAutomaticUserInteractions: true`, taps on web also carry the
+Taps on web also carry the
 browser SDK's click keys (`x`, `y`, `pageX`, `pageY`, `viewport.*`,
 `target_xpath`, `pointer.type`), which the web click heatmap reads, and
 network requests started within a second of a tap get
@@ -336,10 +336,8 @@ await FlutterOTel.initialize(
   serviceName: 'my-web-app',
   middlewareAccountKey: '<key>',
   endpoint: 'https://<account>.middleware.io',
-  enableAutomaticUserInteractions: true,
   webInstrumentation: WebInstrumentationOptions(
     tracePropagationTargets: [RegExp(r'api\.example\.com')],
-    websocket: true,
   ),
 );
 ```
@@ -429,23 +427,14 @@ FlutterOTel().endScreenSpan('checkout');
 
 ### Error Reporting
 
+Uncaught Flutter and platform errors are reported automatically
+(`autoCaptureErrors`, on by default). Report errors you catch yourself with
+`reportError`:
+
 ```dart
-// Report errors from any zone
 FlutterOTel.reportError('network_error', error, stackTrace,
   attributes: {'endpoint': '/api/users'},
 );
-
-// In Flutter error handler
-FlutterError.onError = (details) {
-  FlutterOTel.reportError(
-    'FlutterError', details.exception, details.stack);
-};
-
-// For async errors
-PlatformDispatcher.instance.onError = (error, stack) {
-  FlutterOTel.reportError('PlatformError', error, stack);
-  return true;
-};
 ```
 
 ### Custom OTel Events
@@ -554,43 +543,26 @@ await FlutterOTel.startSessionRecording();
 await FlutterOTel.stopSessionRecording();
 ```
 
-The `RepaintBoundary` below is required only for the **Dart** recorder (web /
-v3 opt-out); the native v3 recorder captures the real window, including platform
-views.
+The **Dart** recorder (web and desktop) starts by itself after the first frame
+and captures the whole app window; no widget wrapping is needed. To record
+only part of the UI, wrap it in a `RepaintBoundary` with the SDK key, and the
+recorder captures that instead. The native recorder (Android/iOS) always
+captures the real window, including platform views.
 
 ```dart
-class MyAppState extends State<MyApp> {
-  
-  @override
-  void initState() {
-    Timer(Duration(milliseconds: 500), () {
-      FlutterOTel.startSessionRecording();
-    });
-    super.initState();
-  }
-  
-  @override
-  void dispose(){
-    try {
-      FlutterOTel.stopSessionRecording();
-    } catch (e) {}
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-        key: FlutterOTel.repaintBoundaryKey,
-        child: ...;
-  }
-}
+RepaintBoundary(
+  key: FlutterOTel.repaintBoundaryKey,
+  child: /* the part of the app to record */,
+)
 ```
 
 #### Recording Quality
 
 Control the session replay frame quality with `RecordingOptions`, passed to
-`FlutterOTel.initialize`. The defaults are tuned for low bandwidth; raise
-`qualityValue` (and optionally `minShortSidePx`) for a sharper replay.
+`FlutterOTel.initialize`. The defaults match the native SDKs' standard
+setting: JPEG quality 50, a 640 px short edge (captured at up to the screen's
+pixel ratio), one frame a second, and no frame at all while nothing on screen
+changes. Lower `qualityValue` / `minShortSidePx` to save bandwidth.
 
 ```dart
 import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';

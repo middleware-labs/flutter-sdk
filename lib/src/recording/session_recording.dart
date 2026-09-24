@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 
 import 'jpeg_encoder.dart' as jpeg;
@@ -39,13 +41,12 @@ enum NativeRecordingQuality { low, standard, high }
 
 /// Recording options configuration
 class RecordingOptions {
-  /// How often a screenshot is attempted.  4 s is a good balance; use 6–8 s
-  /// for even lower bandwidth.
+  /// How often a frame is captured. Default 1 s, the native SDKs' default
+  /// frequency; frames are skipped anyway while nothing is rendered.
   final Duration screenshotInterval;
 
-  /// JPEG quality 1–100.  35 is visually acceptable for session replay and
-  /// produces files ≈ 8–25 KB at 240 p.  Do NOT go above 60 without also
-  /// reducing [minShortSidePx].
+  /// JPEG quality 1–100. Default 50, the native SDKs' "standard" quality
+  /// (Android and iOS use 25 / 50 / 75 for low / standard / high).
   final int qualityValue;
 
   /// FIX #1 — Renamed from maxDimension.
@@ -58,6 +59,8 @@ class RecordingOptions {
   ///
   /// This keeps the same visual density on both orientations and is consistent
   /// with how the Middleware backend expects session-replay frames to be sized.
+  /// Default 640, the native SDKs' short edge. Frames are captured at up to
+  /// the device pixel ratio to reach it, and never upscaled beyond that.
   final int minShortSidePx;
 
   @Deprecated('No effect: frames are streamed as rrweb events, not archived.')
@@ -87,9 +90,9 @@ class RecordingOptions {
   final bool? maskAllImages;
 
   const RecordingOptions({
-    this.screenshotInterval = const Duration(milliseconds: 500),
-    this.qualityValue = 10,
-    this.minShortSidePx = 320,
+    this.screenshotInterval = const Duration(seconds: 1),
+    this.qualityValue = 50,
+    this.minShortSidePx = 640,
     this.archiveChunkSize = 10,
     this.staleArchiveMaxAge = const Duration(seconds: 59),
     this.staleScreenshotMaxAge = const Duration(seconds: 59),
@@ -184,6 +187,30 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
   /// of queueing another.
   bool _captureInFlight = false;
 
+  /// Whether Flutter rendered a frame since the last capture. Nothing on
+  /// screen can have changed otherwise, so the tick skips the capture, the
+  /// GPU readback and the JPEG encode (identical frames used to be dropped
+  /// only after all three).
+  bool _renderedSinceCapture = true;
+  bool _watchingFrames = false;
+
+  void _watchFrames() {
+    if (_watchingFrames) return;
+    _watchingFrames = true;
+    SchedulerBinding.instance.addPostFrameCallback(_onFrameRendered);
+  }
+
+  // Re-arms itself for the next frame; registering doesn't schedule one, so
+  // an idle app costs nothing.
+  void _onFrameRendered(Duration _) {
+    _renderedSinceCapture = true;
+    if (_isRunning) {
+      SchedulerBinding.instance.addPostFrameCallback(_onFrameRendered);
+    } else {
+      _watchingFrames = false;
+    }
+  }
+
   /// Last [_screenshotTick] future — [stop] awaits this before the final flush.
   Future<void>? _ongoingCapture;
 
@@ -229,6 +256,7 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
 
     WidgetsBinding.instance.addObserver(this);
     GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointerEvent);
+    _watchFrames();
 
     _screenshotTimer = Timer.periodic(
       builder.recordingOptions.screenshotInterval,
@@ -295,6 +323,7 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
     _lastMetaHeight = -1;
     _lastFrameDataUri = null;
     _lastScreenName = null;
+    _renderedSinceCapture = true;
   }
 
   // -------------------------------------------------------------------------
@@ -325,6 +354,11 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
       if (_stopped) {
         return;
       }
+      if (!_renderedSinceCapture && _lastFrameDataUri != null) {
+        return; // nothing rendered since the last frame we shipped
+      }
+      // Cleared before capturing: a frame rendered meanwhile marks it again.
+      _renderedSinceCapture = false;
 
       final frame = await _captureScreenshot();
       if (_stopped || frame == null) {
@@ -425,6 +459,54 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
     return ro is RenderRepaintBoundary ? ro : null;
   }
 
+  /// What a frame is captured from: the app's
+  /// `RepaintBoundary(key: FlutterOTel.repaintBoundaryKey)` when it has one,
+  /// otherwise the whole root view, so replay needs no app changes.
+  ///
+  /// [size] is logical pixels, the size the frame is replayed at; [capture]
+  /// renders at that size.
+  ({
+    Size size,
+    double devicePixelRatio,
+    Future<ui.Image> Function(double pixelRatio) capture,
+  })?
+  _captureTarget() {
+    final views = RendererBinding.instance.renderViews;
+    final viewDpr =
+        views.isEmpty ? 1.0 : views.first.configuration.devicePixelRatio;
+    final boundary = _repaintBoundaryFromKey();
+    if (boundary != null && boundary.hasSize) {
+      return (
+        size: boundary.size,
+        devicePixelRatio: viewDpr,
+        capture: (pixelRatio) => boundary.toImage(pixelRatio: pixelRatio),
+      );
+    }
+    if (views.isEmpty) return null;
+    final view = views.first;
+    // The root view is always a repaint boundary, so its layer is the
+    // OffsetLayer (a TransformLayer scaling logical to physical pixels) that
+    // RenderRepaintBoundary.toImage would use. `debugLayer` is null in
+    // release builds, hence the protected getter.
+    // ignore: invalid_use_of_protected_member
+    final layer = view.layer;
+    if (layer is! OffsetLayer || view.size.isEmpty) {
+      return null;
+    }
+    final dpr = view.configuration.devicePixelRatio;
+    final size = view.size;
+    return (
+      size: size,
+      devicePixelRatio: dpr,
+      // Bounds are in the layer's parent space (physical pixels); dividing
+      // by dpr undoes the layer's own dpr transform.
+      capture: (pixelRatio) => layer.toImage(
+        Offset.zero & (size * dpr),
+        pixelRatio: pixelRatio / dpr,
+      ),
+    );
+  }
+
   /// Captures, optionally masks, downscales and encodes as lossy JPEG.
   ///
   /// Returns the JPEG with the boundary's logical size (the size the frame is
@@ -441,30 +523,18 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
     ui.Image? scaledImage;
     ui.Image? maskedImage;
     try {
-      var boundary = _repaintBoundaryFromKey();
-      if (boundary == null) {
+      var target = _captureTarget();
+      if (target == null) {
         await WidgetsBinding.instance.endOfFrame;
         if (_stopped) {
           return null;
         }
-        boundary = _repaintBoundaryFromKey();
+        target = _captureTarget();
       }
 
-      if (boundary == null) {
-        if (kDebugMode) {
-          final ro = repaintBoundaryKey.currentContext?.findRenderObject();
-          if (ro != null) {
-            debugPrint(
-              'Session replay: GlobalKey must be on a RepaintBoundary '
-              '(got ${ro.runtimeType}).',
-            );
-          } else {
-            debugPrint(
-              'Session replay: RepaintBoundary not in tree yet — wrap your '
-              'app (e.g. MaterialApp) with RepaintBoundary(key: '
-              'FlutterOTel.repaintBoundaryKey, child: ...).',
-            );
-          }
+      if (target == null) {
+        if (OTelLog.isDebug()) {
+          OTelLog.debug('Session replay: nothing rendered yet, skipping frame.');
         }
         return null;
       }
@@ -476,7 +546,17 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
       // ------------------------------------------------------------------
       // 1. Capture at native resolution (pixelRatio 1.0 keeps it manageable)
       // ------------------------------------------------------------------
-      rawImage = await boundary.toImage(pixelRatio: 1.0);
+      // Render just enough pixels for the short side to reach
+      // minShortSidePx (the replay's resolution), up to the screen's real
+      // resolution. 1x logical pixels made text blurry on HiDPI screens.
+      final shortSide = math.min(target.size.width, target.size.height);
+      final pixelRatio =
+          shortSide <= 0
+              ? 1.0
+              : (builder.recordingOptions.minShortSidePx / shortSide)
+                  .clamp(1.0, math.max(1.0, target.devicePixelRatio))
+                  .toDouble();
+      rawImage = await target.capture(pixelRatio);
 
       if (_stopped) {
         return null;
@@ -514,8 +594,10 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
       // 4. Encode as lossy JPEG (off UI thread: background isolate on native,
       //    browser-native canvas encoder on web).
       // ------------------------------------------------------------------
-      if (kDebugMode) {
-        debugPrint(
+      // Per-frame diagnostics: only with SDK debug logging on, since at two
+      // frames a second they flood the console of every debug build.
+      if (OTelLog.isDebug()) {
+        OTelLog.debug(
           'Session replay: encoding JPEG with quality=${builder.recordingOptions.qualityValue} '
           'minShortSidePx=${builder.recordingOptions.minShortSidePx}',
         );
@@ -536,8 +618,8 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
         quality: builder.recordingOptions.qualityValue,
       );
 
-      if (kDebugMode) {
-        debugPrint(
+      if (OTelLog.isDebug()) {
+        OTelLog.debug(
           'Session replay: frame accepted '
           '(${maskedImage.width}×${maskedImage.height}, '
           '${jpegBytes.length} bytes JPEG)',
@@ -546,8 +628,8 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
 
       return (
         jpeg: jpegBytes,
-        width: boundary.size.width.round(),
-        height: boundary.size.height.round(),
+        width: target.size.width.round(),
+        height: target.size.height.round(),
       );
     } catch (e) {
       debugPrint('Error capturing screenshot: $e');
@@ -591,8 +673,8 @@ class MiddlewareScreenshotManager with WidgetsBindingObserver {
       newW = (newH * w / h).round().clamp(1, 1 << 15);
     }
 
-    if (kDebugMode) {
-      debugPrint('Session replay: scaling $w×$h → $newW×$newH');
+    if (OTelLog.isDebug()) {
+      OTelLog.debug('Session replay: scaling $w×$h → $newW×$newH');
     }
 
     final recorder = ui.PictureRecorder();

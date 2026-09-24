@@ -64,6 +64,17 @@ void main() {
         isUrlIgnored('https://x.middleware.io/api/data', defaultIgnoredUrls),
         isFalse,
       );
+      expect(
+        isUrlIgnored(
+          'http://localhost:8090/packages/characters/src/extensions.dart.lib.js',
+          defaultIgnoredUrls,
+        ),
+        isTrue,
+      );
+      expect(
+        isUrlIgnored('https://app.test/main.dart.js', defaultIgnoredUrls),
+        isFalse,
+      );
     });
   });
 
@@ -146,6 +157,8 @@ void main() {
     test('os', () {
       expect(browserOs('MacIntel', chrome), 'Mac OS');
       expect(browserOs('Linux armv8l', 'Mozilla/5.0 (Linux; Android 14)'), 'Android');
+      expect(browserOs('', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'), 'Windows');
+      expect(browserOs('', chrome), 'Mac OS');
     });
 
     test('bots', () {
