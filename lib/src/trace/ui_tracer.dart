@@ -258,13 +258,14 @@ class UITracer implements sdk.Tracer {
     String? targetName,
     Duration? responseTime,
     Attributes? attributes,
+    String? spanName,
   }) {
     if (!enabled) {
       return null;
     }
     FlutterOTel.notifyUserSessionActivity();
 
-    final spanName = 'interaction.$screenName.$interactionType';
+    spanName ??= 'interaction.$screenName.$interactionType';
     actionCount++;
     var interactionAttributes =
         <String, Object>{

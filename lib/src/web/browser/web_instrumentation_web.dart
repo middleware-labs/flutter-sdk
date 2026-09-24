@@ -16,6 +16,8 @@ import 'websocket.dart';
 
 bool isBotTraffic() => isBotUserAgent(userAgent);
 
+String? pagePath() => currentPagePath();
+
 /// Browser identity on the resource, with the browser SDK's keys.
 Map<String, Object> browserResourceAttributes() {
   final ua = userAgent;

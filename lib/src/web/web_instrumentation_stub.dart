@@ -6,6 +6,8 @@ import 'web_instrumentation_options.dart';
 
 bool isBotTraffic() => false;
 
+String? pagePath() => null;
+
 Map<String, Object> browserResourceAttributes() => const {};
 
 void enable(

@@ -2,10 +2,12 @@
 
 import 'package:dartastic_opentelemetry_api/dartastic_opentelemetry_api.dart';
 import 'package:flutter/widgets.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../middleware_flutter_opentelemetry.dart';
 import './nav_util.dart';
 import 'otel_route_data.dart';
+import '../web/web_instrumentation.dart';
 
 const slowFrameThresholdMs = 16;
 const frozenFrameThresholdMs = 700;
@@ -231,9 +233,28 @@ class OTelNavigatorObserver extends NavigatorObserver {
   //   return toPath;
   // }
 
+  /// Name for a route without `settings.name` (common with GoRouter pages):
+  /// the router's current location, else the web page path. The previous
+  /// fallback, the Navigator widget's toString(), is minified in release web
+  /// builds (`Widget-[<optimized out>#007ca root]`) and it names screens in
+  /// replays, the heatmap and navigation spans.
+  static String? _unnamedRouteName(Route route) {
+    try {
+      final context = route.navigator?.context;
+      if (context != null) {
+        final path =
+            GoRouter.maybeOf(context)?.routeInformationProvider.value.uri.path;
+        if (path != null && path.isNotEmpty) return path;
+      }
+    } catch (_) {
+      // not under a GoRouter
+    }
+    return WebInstrumentation.pagePath;
+  }
+
   OTelRouteData _routeDataForRoute(Route route) {
     final String routeName =
-        route.settings.name ?? route.navigator?.widget.toString() ?? "unknown";
+        route.settings.name ?? _unnamedRouteName(route) ?? "unknown";
     String routeArguments;
     if (route.settings.arguments == null) {
       routeArguments = 'none';

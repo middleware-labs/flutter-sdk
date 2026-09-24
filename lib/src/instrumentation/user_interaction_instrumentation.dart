@@ -10,6 +10,7 @@ import 'package:flutter/rendering.dart';
 
 import '../flutterrific_otel.dart';
 import '../web/web_instrumentation.dart';
+import '../web/web_utils.dart' show RageClickDetector;
 
 /// Cardinal direction for scroll / swipe auto-capture (string values match
 /// [InteractionType.gestureDirection] usage elsewhere in this SDK).
@@ -152,6 +153,7 @@ class AutomaticUserInteractionTracker {
       _reportTap(
         targetElement: widgetInfo.targetElement,
         elementClasses: widgetInfo.widgetClassName,
+        xpath: widgetInfo.xpath,
         innerText: innerText,
         x: event.position.dx,
         y: event.position.dy,
@@ -216,9 +218,19 @@ class AutomaticUserInteractionTracker {
     return false;
   }
 
+  /// Rapid repeated taps on one spot (4 within 30 px and 1 s), as in the
+  /// browser SDK.
+  final RageClickDetector _rageClicks = RageClickDetector();
+
+  /// Records a tap in the shape the RUM heatmap reads for mobile apps (the
+  /// native Android/iOS SDKs emit the same): `event.type=tap`, `screen.name`,
+  /// logical-pixel coordinates with the viewport size (they line up with the
+  /// replay frames), and a `target_xpath` unique per control, since the
+  /// heatmap draws one point per distinct xpath.
   void _reportTap({
     required String targetElement,
     required String elementClasses,
+    required String xpath,
     String? innerText,
     required double x,
     required double y,
@@ -226,37 +238,66 @@ class AutomaticUserInteractionTracker {
     DateTime? downAt,
   }) {
     // Taken synchronously so rage-click timing reflects the real tap cadence.
-    final route = FlutterOTel.currentInteractionRouteName;
-    final webAttrs = WebInstrumentation.tapAttributes(
-      x: x,
-      y: y,
-      route: route,
-      targetElement: targetElement,
-      pointerKind: pointerKind,
-    );
+    final route = _screenName();
+    final rage =
+        WebInstrumentation.rageClickEnabled && _rageClicks.isRageClick(x, y);
+    Size? viewport;
+    try {
+      final view = WidgetsBinding.instance.platformDispatcher.views.first;
+      viewport = view.physicalSize / view.devicePixelRatio;
+    } catch (_) {}
+    final label =
+        innerText == null ? 'tap on $targetElement' : "tap on '$innerText'";
     unawaited(
       _report(() {
         final attrs = <String, Object>{
+          'event.type': 'tap',
+          'component': 'ui',
+          'screen.name': route,
+          'x': x,
+          'y': y,
+          'pageX': x,
+          'pageY': y,
+          if (viewport != null) 'viewport.width': viewport.width,
+          if (viewport != null) 'viewport.height': viewport.height,
+          'target_xpath':
+              '/${route.startsWith('/') ? route.substring(1) : route}$xpath',
+          'target_element': targetElement,
+          'target.class': targetElement,
+          if (innerText != null) 'target.text': innerText,
+          'pointer.type': switch (pointerKind) {
+            PointerDeviceKind.touch => 'touch',
+            PointerDeviceKind.stylus ||
+            PointerDeviceKind.invertedStylus => 'pen',
+            _ => 'mouse',
+          },
+          if (rage) 'frustration.type': 'rage_click',
+          // Kept for existing queries.
           'ui.auto.capture': true,
           'ui.auto.x': x,
           'ui.auto.y': y,
           'ui.auto.widget_class': elementClasses,
           if (innerText != null) 'ui.auto.target_text': innerText,
-          ...webAttrs,
         };
         final span = FlutterOTel.tracer.recordUserInteraction(
           route,
           InteractionType.click,
           targetName: targetElement,
           attributes: attrs.toAttributes(),
+          spanName: label,
         );
-        WebInstrumentation.onInteraction(
-          span,
-          innerText == null ? 'click on $targetElement' : "click on '$innerText'",
-          startedAt: downAt,
-        );
+        WebInstrumentation.onInteraction(span, label, startedAt: downAt);
       }),
     );
+  }
+
+  /// The screen a tap belongs to: the route from `FlutterOTel.routeObserver`,
+  /// or on the web the page path (hash routes included) when the app has no
+  /// observer.
+  static String _screenName() {
+    final route = FlutterOTel.currentInteractionRouteName;
+    if (route != 'unknown_route') return route;
+    return WebInstrumentation.pagePath ?? route;
   }
 
   void _reportPan({
@@ -376,6 +417,10 @@ class AutomaticUserInteractionTracker {
         text: textContent,
         accessibilityLabel: semanticsLabel,
         widgetClassName: targetElement,
+        xpath:
+            bestInteractive == null
+                ? '/Screen'
+                : _xpathOf(bestInteractive, targetElement),
       );
     } catch (e) {
       _log('Error extracting widget info: $e');
@@ -413,8 +458,11 @@ class AutomaticUserInteractionTracker {
     Card() => 'Card',
     ListTile() => 'ListTile',
     Tab() => 'Tab',
-    Chip() || ActionChip() || ChoiceChip() || FilterChip() || InputChip() =>
-      'Chip',
+    Chip() ||
+    ActionChip() ||
+    ChoiceChip() ||
+    FilterChip() ||
+    InputChip() => 'Chip',
     Dismissible() => 'Dismissible',
     Switch() => 'Switch',
     Checkbox() => 'Checkbox',
@@ -443,6 +491,42 @@ class AutomaticUserInteractionTracker {
     if (known != null) return known;
     final raw = w.runtimeType.toString();
     return raw.startsWith('_') ? raw.substring(1) : raw;
+  }
+
+  static const int _maxXPathSegments = 8;
+
+  /// A path that tells controls on one screen apart: the control's position
+  /// among its siblings at each point where the tree branches (single-child
+  /// wrappers such as Padding add nothing and are skipped), nearest
+  /// [_maxXPathSegments] levels, plus its string key when it has one.
+  /// Segment names are real widget names only for known controls; others are
+  /// `*`, because release builds minify class names and a name that changes
+  /// every build would split the heatmap across versions.
+  static String _xpathOf(Element target, String targetName) {
+    final key = target.widget.key;
+    final keySuffix =
+        key is ValueKey<String>
+            ? '#${key.value}'
+            : (key is ValueKey<int> ? '#${key.value}' : '');
+    final segments = <String>[];
+    Element child = target;
+    var first = true;
+    for (final parent in _selfAndAncestors(target).skip(1)) {
+      if (segments.length >= _maxXPathSegments) break;
+      final siblings = <Element>[];
+      parent.visitChildren(siblings.add);
+      if (first || siblings.length > 1) {
+        final name =
+            first
+                ? '$targetName$keySuffix'
+                : (_knownWidgetName(child.widget) ?? '*');
+        final index = siblings.indexWhere((e) => identical(e, child));
+        segments.add('$name[${index < 0 ? 0 : index}]');
+        first = false;
+      }
+      child = parent;
+    }
+    return '/${segments.reversed.join('/')}';
   }
 
   Element? _smallestInteractive(List<Element> hits) {
@@ -557,9 +641,14 @@ class _WidgetInfo {
     this.text,
     this.accessibilityLabel,
     this.widgetClassName = 'Unknown',
+    this.xpath = '/Screen',
   });
 
   final String targetElement;
+
+  /// Widget path of the tapped control below the screen, e.g.
+  /// `/Column[1]/Row[0]/IconButton[1]`.
+  final String xpath;
   final String? text;
   final String? accessibilityLabel;
   final String widgetClassName;

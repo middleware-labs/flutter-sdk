@@ -21,6 +21,19 @@
     `RepaintBoundary(key: FlutterOTel.repaintBoundaryKey)`. Calling
     `startSessionRecording()` or wrapping the app is no longer needed;
     `stopSessionRecording()` before the first frame keeps it off.
+- Taps now appear on the RUM heatmap. Bifrost shows Flutter apps (web
+  included) with the mobile heatmap, which reads `event.type=tap` spans with
+  `screen.name`; Flutter sent `click` and no screen name, so no tap ever
+  showed. Auto-captured taps now carry the native SDKs' tap shape on every
+  platform (`event.type=tap`, `component=ui`, `screen.name`, logical-pixel
+  coordinates and viewport, `target.class` / `target.text`) and a
+  `target_xpath` unique per control (widget position path + string key),
+  since the heatmap draws one point per xpath. Span names are
+  `tap on 'Label'`. Rage clicks are detected on every platform.
+- Routes without `settings.name` (common with GoRouter pages) are named after
+  the router location (or web page path) instead of the Navigator's
+  `toString()`, which is minified in release web builds
+  (`Widget-[<optimized out>…]`) and named replay and heatmap screens.
 - `enableMetrics` now defaults to `false`: the Flutter metrics exporter,
   reader and collectors are only created when you opt in.
 - Session replay on web and desktop uses the native SDKs' standard quality:

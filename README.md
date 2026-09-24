@@ -322,13 +322,14 @@ desktop.
 | `errors` | on | uncaught JS errors, unhandled rejections, failed resource loads and `console.error`, with parsed JS stacks |
 | `console` | on | `console.log/info/warn/debug` calls from JavaScript as logs (100/s limit). Dart `print` / `debugPrint` output is not captured here (so the SDK never records its own diagnostics); use `logPrint` for that |
 | `websocket` | on | WebSocket connect / send / onmessage |
-| `rageClick` | on | `frustration.type=rage_click` on taps |
+| `rageClick` | on | `frustration.type=rage_click` on taps (web; always on elsewhere) |
 | `blockBotTraffic` | on | no telemetry for crawlers and headless browsers |
 
-Taps on web also carry the
-browser SDK's click keys (`x`, `y`, `pageX`, `pageY`, `viewport.*`,
-`target_xpath`, `pointer.type`), which the web click heatmap reads, and
-network requests started within a second of a tap get
+Taps (on every platform) are recorded the way the RUM heatmap reads them, as
+the native Android/iOS SDKs do: `event.type=tap`, `screen.name`,
+logical-pixel `x`/`y`/`pageX`/`pageY` with `viewport.*`, and a `target_xpath`
+that is unique per control on a screen (the heatmap draws one point per
+xpath). On web, network requests started within a second of a tap get
 `interaction.trace_id` / `interaction.span_id` / `interaction.name`.
 
 ```dart
