@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../flutterrific_otel.dart';
+import '../web/web_instrumentation.dart';
 
 /// Cardinal direction for scroll / swipe auto-capture (string values match
 /// [InteractionType.gestureDirection] usage elsewhere in this SDK).
@@ -153,6 +154,8 @@ class AutomaticUserInteractionTracker {
         innerText: innerText,
         x: event.position.dx,
         y: event.position.dy,
+        pointerKind: event.kind,
+        downAt: state.downAt,
       );
     } else {
       final direction = _directionFromDisplacement(dx, dy);
@@ -228,22 +231,38 @@ class AutomaticUserInteractionTracker {
     String? innerText,
     required double x,
     required double y,
+    PointerDeviceKind? pointerKind,
+    DateTime? downAt,
   }) {
+    // Taken synchronously so rage-click timing reflects the real tap cadence.
+    final route = FlutterOTel.currentInteractionRouteName;
+    final webAttrs = WebInstrumentation.tapAttributes(
+      x: x,
+      y: y,
+      route: route,
+      targetElement: targetElement,
+      pointerKind: pointerKind,
+    );
     unawaited(
       _report(() {
-        final route = FlutterOTel.currentInteractionRouteName;
         final attrs = <String, Object>{
           'ui.auto.capture': true,
           'ui.auto.x': x,
           'ui.auto.y': y,
           'ui.auto.widget_class': elementClasses,
           if (innerText != null) 'ui.auto.target_text': innerText,
+          ...webAttrs,
         };
-        FlutterOTel.tracer.recordUserInteraction(
+        final span = FlutterOTel.tracer.recordUserInteraction(
           route,
           InteractionType.click,
           targetName: targetElement,
           attributes: attrs.toAttributes(),
+        );
+        WebInstrumentation.onInteraction(
+          span,
+          innerText == null ? 'click on $targetElement' : "click on '$innerText'",
+          startedAt: downAt,
         );
       }),
     );
@@ -628,4 +647,9 @@ class _PointerState {
   Duration lastTime;
   bool hasMoved = false;
   final bool isSwipeContext;
+
+  /// Wall-clock time of the pointer down. Tap handlers run before this
+  /// tracker sees the pointer up, so requests they fire are attributed from
+  /// here.
+  final DateTime downAt = DateTime.now();
 }

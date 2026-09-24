@@ -296,6 +296,51 @@ await FlutterOTel.initialize(
   secure: true,
   dartasticApiKey: null,
   tenantId: null,
+
+  // Flutter web browser instrumentation (ignored on other platforms)
+  webInstrumentation: const WebInstrumentationOptions(),
+);
+```
+
+### Flutter Web Instrumentation
+
+On Flutter web the SDK also instruments the browser, the same way the
+Middleware browser SDK (`@middleware.io/browser`) does, with the same span
+names and attributes, so Flutter web sessions show up in RUM like any other
+web app. Everything is on by default; nothing changes on Android, iOS or
+desktop.
+
+| Option | Default | What it records |
+|--------|---------|-----------------|
+| `documentLoad` | on | `documentLoad` trace from Navigation Timing (`documentFetch` + one span per resource), plus resources loaded later (CanvasKit, fonts, images) with `resource.post_load=true` |
+| `network` | on | `fetch` and `XMLHttpRequest` spans (`GET host/path`, `event.type=fetch\|xhr`, `resource.*` timings). Patched in the browser, so `package:http`, `dio` and Flutter's asset loading are all covered without wrapping clients |
+| `advanceNetworkCapture` | off | request/response headers and bodies on network spans |
+| `tracePropagationTargets` | same origin | cross-origin URLs that get `traceparent` / `b3` headers (their CORS policy must allow them) |
+| `webVitals` | on | LCP, FCP, CLS, INP and TTFB with attribution |
+| `longTask` | on | main-thread tasks over 50ms |
+| `pageTracking` | on | `pageview` on URL changes (hash routes included), `pageleave`, `pagehide`; sets `root.url` / `page.href` / `page.title` on all spans |
+| `errors` | on | uncaught JS errors, unhandled rejections, failed resource loads and `console.error`, with parsed JS stacks |
+| `console` | on | `console.log/info/warn/debug` as logs (100/s limit). `console.log` is skipped when `logPrint` is on, since `print` already writes there |
+| `websocket` | off | WebSocket connect / send / onmessage |
+| `rageClick` | on | `frustration.type=rage_click` on auto-captured taps (needs `enableAutomaticUserInteractions`) |
+| `blockBotTraffic` | on | no telemetry for crawlers and headless browsers |
+
+With `enableAutomaticUserInteractions: true`, taps on web also carry the
+browser SDK's click keys (`x`, `y`, `pageX`, `pageY`, `viewport.*`,
+`target_xpath`, `pointer.type`), which the web click heatmap reads, and
+network requests started within a second of a tap get
+`interaction.trace_id` / `interaction.span_id` / `interaction.name`.
+
+```dart
+await FlutterOTel.initialize(
+  serviceName: 'my-web-app',
+  middlewareAccountKey: '<key>',
+  endpoint: 'https://<account>.middleware.io',
+  enableAutomaticUserInteractions: true,
+  webInstrumentation: WebInstrumentationOptions(
+    tracePropagationTargets: [RegExp(r'api\.example\.com')],
+    websocket: true,
+  ),
 );
 ```
 

@@ -13,6 +13,7 @@ import 'package:middleware_flutter_opentelemetry/src/recording/session_recording
 import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger.dart';
 import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger_provider.dart';
 import 'package:middleware_flutter_opentelemetry/src/semantics/flutter_semantics.dart';
+import 'package:middleware_flutter_opentelemetry/src/web/web_instrumentation.dart';
 
 typedef CommonAttributesFunction = Attributes Function();
 
@@ -81,6 +82,25 @@ class CommonAttributeSpanProcessor implements SimpleSpanProcessor {
   Future<void> onNameUpdate(Span span, String newName) {
     return delegate.onNameUpdate(span, newName);
   }
+}
+
+/// Drops every span. Used when bot traffic is blocked, so the app's own
+/// tracing calls keep working but nothing is exported.
+class _DroppingSpanProcessor implements SpanProcessor {
+  @override
+  Future<void> onStart(Span span, Context? parentContext) async {}
+
+  @override
+  Future<void> onEnd(Span span) async {}
+
+  @override
+  Future<void> onNameUpdate(Span span, String newName) async {}
+
+  @override
+  Future<void> shutdown() async {}
+
+  @override
+  Future<void> forceFlush() async {}
 }
 
 /// Main entry point for Middleware Flutter OpenTelemetry SDK.
@@ -356,6 +376,10 @@ class FlutterOTel {
   /// [automaticUserInteractionTapThreshold] separates tap from scroll/swipe
   /// in logical pixels (default 20).
   /// [automaticUserInteractionDebug] prints diagnostic messages to the console.
+  /// [webInstrumentation] configures the Flutter web browser instrumentation
+  /// (document load, fetch/XHR, web vitals, long tasks, page views, JS errors
+  /// and console, WebSocket), mirroring the Middleware browser SDK. Ignored on
+  /// other platforms.
   static Future<void> initialize({
     String? appName,
     String? endpoint,
@@ -399,8 +423,26 @@ class FlutterOTel {
     /// navigation, and errors. Defaults to true. Set to false to disable
     /// automatic log event emission while still enabling manual logger usage.
     bool enableAutoLogEvents = true,
+    WebInstrumentationOptions webInstrumentation =
+        const WebInstrumentationOptions(),
   }) async {
     _appName = appName ?? serviceName;
+    WebInstrumentation.disable();
+    // Like the browser SDK, crawlers and headless browsers produce no RUM
+    // data. The SDK still initializes so the app's own OTel calls work.
+    final blockedBot =
+        webInstrumentation.enabled &&
+        webInstrumentation.blockBotTraffic &&
+        WebInstrumentation.isBotTraffic;
+    if (blockedBot) {
+      enableSessionRecording = false;
+      enableMetrics = false;
+      enableLogs = false;
+      spanProcessor = _DroppingSpanProcessor();
+      if (kDebugMode) {
+        debugPrint('Middleware: bot traffic detected, telemetry disabled');
+      }
+    }
     FlutterOTel.commonAttributesFunction = commonAttributesFunction;
     if (endpoint == null) {
       // OTel environment variables come first
@@ -498,6 +540,7 @@ class FlutterOTel {
         'session.start_time': sessionStartTime!,
         'mw.rum': 'true',
         'os': _operatingSystemName(),
+        ...WebInstrumentation.resourceAttributes(),
         'recording':
             (enableSessionRecording &&
                     (nativeRecordingIntended || _screenshotManager != null))
@@ -715,6 +758,14 @@ class FlutterOTel {
       });
     }
 
+    if (!blockedBot) {
+      WebInstrumentation.enable(
+        webInstrumentation,
+        // On the web `print` writes to console.log; don't capture it twice.
+        captureConsoleLog: !logPrint,
+      );
+    }
+
     if (enableAutomaticUserInteractions) {
       AutomaticUserInteractionTracker.initialize(
         tapThreshold: automaticUserInteractionTapThreshold,
@@ -754,7 +805,7 @@ class FlutterOTel {
   /// Starts session recording.
   ///
   /// Works on both recording paths: the native (v3) recorder on Android/iOS and
-  /// the Dart recorder used for web and the explicit v3 opt-out.
+  /// the Dart recorder used on web and desktop.
   ///
   /// On the native path this overrides both `enableSessionRecording: false` and
   /// the session sampler, and is sticky — recording keeps running across session
@@ -791,7 +842,7 @@ class FlutterOTel {
 
     try {
       _sessionManager?.hasRecording = true;
-      await _screenshotManager!.start(DateTime.now().millisecondsSinceEpoch);
+      await _screenshotManager!.start();
       // The recorder's capture tick drives idle checks again.
       _idleCheckTimer?.cancel();
       _idleCheckTimer = null;
@@ -1218,6 +1269,7 @@ class FlutterOTel {
       _lifecycleObserver!.dispose();
     }
     AutomaticUserInteractionTracker.shutdown();
+    WebInstrumentation.disable();
     stopSessionRecording();
     _idleCheckTimer?.cancel();
     _idleCheckTimer = null;
@@ -1255,6 +1307,7 @@ class FlutterOTel {
     // ignore: invalid_use_of_visible_for_testing_member
     await sdk.OTel.reset();
     AutomaticUserInteractionTracker.shutdown();
+    WebInstrumentation.disable();
     _sessionManager?.dispose();
     _sessionManager = null;
     _enableAutoLogEvents = true;

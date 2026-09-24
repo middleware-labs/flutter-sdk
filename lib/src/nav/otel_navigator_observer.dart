@@ -166,12 +166,14 @@ class OTelNavigatorObserver extends NavigatorObserver {
     // If updateCurrentTo is null and useDefault is false, keep as-is
 
     // Drive the native screen-name store so native telemetry and the v3
-    // session recording carry the Dart route name. Runs after the
-    // currentRouteData update so it always reflects the visible route.
-    // No-op on web / when the plugin is unavailable.
+    // session recording carry the Dart route name, and label the Dart
+    // recorder's replay timeline. Runs after the currentRouteData update so
+    // it always reflects the visible route. The native call is a no-op on
+    // web / when the plugin is unavailable.
     final screenName = currentRouteData?.routeName;
     if (screenName != null && screenName.isNotEmpty) {
       MiddlewareNativeBridge.setScreenName(screenName);
+      FlutterOTel.screenshotManager?.setScreenName(screenName);
     }
   }
 

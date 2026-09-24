@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+- Flutter web browser instrumentation, matching the Middleware browser SDK:
+  document load and resource timings, `fetch` / `XMLHttpRequest` spans with
+  trace-header propagation, Core Web Vitals (LCP, FCP, CLS, INP, TTFB), long
+  tasks, page views / page leave, JS errors and console capture, WebSocket
+  spans, rage clicks, tap-to-request attribution, and bot-traffic blocking.
+  Configure with `FlutterOTel.initialize(webInstrumentation: ...)`; on by
+  default on the web, no effect on other platforms.
+- Fixed `UISpan.end` ignoring `endTime` and `spanStatus`: spans ended with an
+  explicit end time (`recordUserInteraction` with a `responseTime`,
+  `recordPerformanceMetric`, navigation durations) were recorded as ending
+  when `end` was called.
+- Fixed `UITracer.createSpan` throwing a cast error.
+- `UITracer.recordUserInteraction` now returns the recorded span.
+
+## 2.1.0
+
+- Fixed web session replay: web sessions had no playable recording. The Dart
+  recorder (web and desktop) still uploaded JPEG tarballs to `/v1/rum`, which
+  the backend turns into a video event that the Middleware session player
+  ignores. It now emits the same rrweb stream as the native SDKs and the
+  browser SDK (`rum_event` metrics to `/v1/metrics`): a full snapshot per
+  session / viewport size / return to foreground, an image mutation per
+  changed frame (identical frames are skipped), taps, and route names on the
+  replay timeline.
+- Deprecated `RecordingOptions.archiveChunkSize`, `staleArchiveMaxAge`,
+  `staleScreenshotMaxAge` and `uploadStaleFilesOnStart`; they have no effect.
+- Removed the unused `archive` and `path_provider` dependencies.
+
 ## 2.0.2
 
 - Fixed Android session replay: Android sessions recorded nothing. Two causes:
