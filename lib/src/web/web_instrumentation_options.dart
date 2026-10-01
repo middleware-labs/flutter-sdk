@@ -1,16 +1,13 @@
 // Licensed under the Apache License, Version 2.0
 
-/// Trace-context header formats injected into instrumented requests.
-enum TracePropagationFormat {
-  /// W3C `traceparent` only.
-  w3c,
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
+    show TracePropagationFormat;
 
-  /// B3 single (`b3`) and multi (`X-B3-*`) headers.
-  b3,
-
-  /// W3C plus both B3 encodings (browser SDK default).
-  all,
-}
+// One enum for web and mobile: the web options take it here, and the mobile
+// `HttpInstrumentationConfig` (OTelHttpClient / OTelDioInterceptor) takes the
+// same type.
+export 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
+    show TracePropagationFormat;
 
 /// Browser instrumentation for Flutter web, mirroring the Middleware browser
 /// SDK (`@middleware.io/browser`). Ignored on every other platform.

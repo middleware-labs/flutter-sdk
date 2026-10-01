@@ -1,6 +1,6 @@
 name: middleware_flutter_opentelemetry
 description: "A Flutter package for OpenTelemetry based on middleware_dart_opentelemetry"
-version: 2.1.0
+version: 2.1.1
 homepage: https://middleware.io
 repository: https://github.com/middleware-labs/flutter-sdk.git
 
@@ -11,7 +11,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  middleware_dart_opentelemetry: ^1.0.6
+  middleware_dart_opentelemetry: ^1.0.7
   # Pinned: 1.0.0-rc.1 removed the Flutter semantic enums
   # (NavigationAction, AppLifecycleSemantics, InteractionType, ...) this SDK
   # builds against.
