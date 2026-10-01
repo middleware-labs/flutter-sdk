@@ -343,6 +343,33 @@ await FlutterOTel.initialize(
 );
 ```
 
+### Network Requests (Android / iOS / desktop)
+
+Outside the browser there is nothing to patch, so wrap the client your app
+uses. Each request gets a `GET host/path` client span (`event.type=xhr`), the
+same name the web SDK uses, and carries trace headers so your backend's spans
+join the app's trace:
+
+```dart
+final client = http.Client().instrument();      // package:http
+dio.addOTelInstrumentation();                   // dio
+```
+
+By default both W3C (`traceparent`) and B3 (`b3`, `x-b3-*`) headers are sent.
+To send only one:
+
+```dart
+final client = http.Client().instrument(
+  config: const HttpInstrumentationConfig(
+    tracePropagationFormat: TracePropagationFormat.b3, // or .w3c
+  ),
+);
+```
+
+Use `shouldInstrument: (url) => ...` to skip URLs. Skipped requests get no
+span and no headers. On web the browser instrumentation already covers every
+client, so wrap only when `!kIsWeb` to avoid a second span per request.
+
 ### Platform-Specific Exporters
 
 Flutterrific automatically selects the right protocol:

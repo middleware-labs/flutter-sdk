@@ -11,7 +11,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  middleware_dart_opentelemetry: ^1.0.6
+  middleware_dart_opentelemetry: ^1.0.7
   # Pinned: 1.0.0-rc.1 removed the Flutter semantic enums
   # (NavigationAction, AppLifecycleSemantics, InteractionType, ...) this SDK
   # builds against.
