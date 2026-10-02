@@ -10,7 +10,10 @@ void main() {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     final version =
         RegExp(r'^version:\s*(\S+)', multiLine: true).firstMatch(pubspec)!;
-    expect(middlewareFlutterSdkVersion, version.group(1),
-        reason: 'bump lib/src/util/sdk_version.dart with the pubspec');
+    expect(
+      middlewareFlutterSdkVersion,
+      version.group(1),
+      reason: 'bump lib/src/util/sdk_version.dart with the pubspec',
+    );
   });
 }

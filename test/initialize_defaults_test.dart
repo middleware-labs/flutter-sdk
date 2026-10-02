@@ -41,7 +41,9 @@ void main() {
     );
 
     final resource = OTel.tracerProvider().resource!;
-    expect(resource.attributes.getString('mw.rum.sdk.version'),
-        middlewareFlutterSdkVersion);
+    expect(
+      resource.attributes.getString('mw.rum.sdk.version'),
+      middlewareFlutterSdkVersion,
+    );
   });
 }
