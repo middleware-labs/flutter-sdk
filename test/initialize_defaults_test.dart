@@ -2,6 +2,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
+import 'package:middleware_flutter_opentelemetry/src/util/sdk_version.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -26,5 +27,21 @@ void main() {
     );
 
     expect(FlutterOTel.commonAttributesFunction, isNotNull);
+  });
+
+  test('initialize reports the Flutter SDK version on the resource', () async {
+    await FlutterOTel.initialize(
+      endpoint: 'http://localhost:4318',
+      serviceName: 'defaults-test',
+      enableMetrics: false,
+      enableLogs: false,
+      enableSessionRecording: false,
+      flushTracesInterval: null,
+      detectPlatformResources: false,
+    );
+
+    final resource = OTel.tracerProvider().resource!;
+    expect(resource.attributes.getString('mw.rum.sdk.version'),
+        middlewareFlutterSdkVersion);
   });
 }

@@ -13,6 +13,7 @@ import 'package:middleware_flutter_opentelemetry/src/recording/session_recording
 import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger.dart';
 import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger_provider.dart';
 import 'package:middleware_flutter_opentelemetry/src/semantics/flutter_semantics.dart';
+import 'package:middleware_flutter_opentelemetry/src/util/sdk_version.dart';
 import 'package:middleware_flutter_opentelemetry/src/web/web_instrumentation.dart';
 
 typedef CommonAttributesFunction = Attributes Function();
@@ -541,6 +542,7 @@ class FlutterOTel {
         'session.id': appLaunchId!,
         'session.start_time': sessionStartTime!,
         'mw.rum': 'true',
+        'mw.rum.sdk.version': middlewareFlutterSdkVersion,
         'os': _operatingSystemName(),
         ...WebInstrumentation.resourceAttributes(),
         'recording':
@@ -704,6 +706,7 @@ class FlutterOTel {
         sessionRecording: enableSessionRecording,
         sessionSamplingRatio: sessionSamplingRatio,
         recordingOptions: recordingOptions.toNativeMap(),
+        globalAttributes: {'mw.rum.sdk.version': middlewareFlutterSdkVersion},
       );
       _nativeSdkActive = nativeInfo != null;
       if (_nativeSdkActive) {
