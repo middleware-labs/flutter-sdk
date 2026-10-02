@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:middleware_flutter_opentelemetry/middleware_flutter_opentelemetry.dart';
 import 'package:go_router/go_router.dart';
+import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
+    as sdk;
+import 'package:middleware_dart_opentelemetry/testing.dart';
 
 import 'testing_utils/test_otel_helper.dart';
 
@@ -450,6 +453,76 @@ void main() {
           navigatorObserver.currentRouteData?.routeSpanId,
           isNot(equals(detailsRouteId)),
         );
+      },
+      timeout: const Timeout(Duration(seconds: 10)),
+    );
+  });
+
+  group('OTelNavigatorObserver screen_view spans', () {
+    late OTelNavigatorObserver navigatorObserver;
+    late InMemorySpanExporter exporter;
+
+    setUp(() async {
+      await FlutterOTel.reset();
+      exporter = InMemorySpanExporter();
+      await initializeFlutterOTelForTest(
+        serviceName: 'ui-test-service',
+        spanProcessor: sdk.SimpleSpanProcessor(exporter),
+      );
+      navigatorObserver = OTelNavigatorObserver();
+    });
+
+    tearDown(() async {
+      await FlutterOTel.reset();
+    });
+
+    List<sdk.Span> screenViews() =>
+        exporter.spans
+            .where((s) => s.attributes.getString('event.type') == 'screen_view')
+            .toList();
+
+    testWidgets(
+      'Should emit one screen_view per visible screen change',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            initialRoute: '/',
+            navigatorObservers: [navigatorObserver],
+            routes: {
+              '/':
+                  (context) => Scaffold(
+                    body: ElevatedButton(
+                      key: const Key('go_to_details'),
+                      onPressed: () => Navigator.pushNamed(context, '/details'),
+                      child: const Text('Details'),
+                    ),
+                  ),
+              '/details':
+                  (context) => Scaffold(
+                    body: ElevatedButton(
+                      key: const Key('go_back'),
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Back'),
+                    ),
+                  ),
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('go_to_details')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('go_back')));
+        await tester.pumpAndSettle();
+
+        final views = screenViews();
+        expect(
+          views.map((s) => s.attributes.getString('screen.name')).toList(),
+          ['/', '/details', '/'],
+        );
+        expect(views.map((s) => s.name).toList(), ['/', '/details', '/']);
+        expect(views[1].attributes.getString('last.screen.name'), '/');
+        expect(views[0].attributes.getString('last.screen.name'), isNull);
       },
       timeout: const Timeout(Duration(seconds: 10)),
     );

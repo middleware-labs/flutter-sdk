@@ -17,6 +17,9 @@ class OTelNavigatorObserver extends NavigatorObserver {
   /// a spanId equivalent for a route
   OTelRouteData? currentRouteData;
 
+  /// Screen of the last `screen_view`, so a dialog over the same screen isn't a new view.
+  String? _lastScreenViewName;
+
   OTelNavigatorObserver();
 
   /// Handles a route change event.
@@ -176,7 +179,32 @@ class OTelNavigatorObserver extends NavigatorObserver {
     if (screenName != null && screenName.isNotEmpty) {
       MiddlewareNativeBridge.setScreenName(screenName);
       FlutterOTel.screenshotManager?.setScreenName(screenName);
+      _recordScreenView(screenName);
     }
+  }
+
+  /// Emits a `screen_view` span (the mobile counterpart of the browser's
+  /// `pageview`) when the visible screen changes; it feeds RUM view counts.
+  void _recordScreenView(String screenName) {
+    // On the web, page tracking already reports each view as a `pageview`.
+    if (WebInstrumentation.isActive || screenName == _lastScreenViewName) {
+      return;
+    }
+    final previous = _lastScreenViewName;
+    _lastScreenViewName = screenName;
+    FlutterOTel.tracer
+        .startSpan(
+          screenName,
+          kind: SpanKind.client,
+          attributes:
+              <String, Object>{
+                'event.type': 'screen_view',
+                'component': 'ui',
+                'screen.name': screenName,
+                if (previous != null) 'last.screen.name': previous,
+              }.toAttributes(),
+        )
+        .end();
   }
 
   @override

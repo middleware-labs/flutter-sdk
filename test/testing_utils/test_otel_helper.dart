@@ -23,12 +23,13 @@ Future<void> initializeFlutterOTelForTest({
   bool enableMetrics = false,
   LogRecordProcessor? logRecordProcessor,
   CommonAttributesFunction? commonAttributesFunction,
+  SpanProcessor? spanProcessor,
 }) async {
   await FlutterOTel.initialize(
     endpoint: 'http://localhost:4317',
     serviceName: serviceName,
     serviceVersion: serviceVersion,
-    spanProcessor: SimpleSpanProcessor(ConsoleExporter()),
+    spanProcessor: spanProcessor ?? SimpleSpanProcessor(ConsoleExporter()),
     enableMetrics: enableMetrics,
     enableLogs: enableLogs,
     enableAutoLogEvents: enableAutoLogEvents,

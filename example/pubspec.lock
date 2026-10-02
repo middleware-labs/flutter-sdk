@@ -276,17 +276,17 @@ packages:
     dependency: transitive
     description:
       name: middleware_dart_opentelemetry
-      sha256: "9fc33314d0830b82d0751746893a2c2b166ab3d52d933922a2d8b7aa4f77883a"
+      sha256: "57e2521b29b587a122efad7c742d7160d6790070dab592a0d4ba670e6192cc4b"
       url: "https://pub.dev"
     source: hosted
-    version: "1.0.6"
+    version: "1.0.7"
   middleware_flutter_opentelemetry:
     dependency: "direct main"
     description:
       path: ".."
       relative: true
     source: path
-    version: "2.1.0"
+    version: "2.1.2"
   mime:
     dependency: transitive
     description:
