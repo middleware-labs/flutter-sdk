@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- HTTP requests are traced automatically on Android, iOS and desktop. Before
+  this, only clients wrapped with `instrument()` / `addOTelInstrumentation()`
+  produced network spans, so a plain `Dio()` or `http.get()` was invisible.
+  `initialize` now installs an `HttpOverrides` that wraps every `dart:io`
+  `HttpClient` (`package:http`, `dio`, `NetworkImage`, ...): each request gets
+  `OTelHttpClient`'s span (`{METHOD} {host}{path}`, `event.type=xhr`, status,
+  sizes, errors) from connection open to the last body byte, plus `traceparent`
+  / `b3` headers. Requests a manual wrapper already traces are skipped, so they
+  are still recorded once. An app's own `HttpOverrides`, if installed before
+  `initialize`, is kept and chained. Configure with
+  `networkInstrumentationConfig` (`HttpInstrumentationConfig`); turn off with
+  `enableAutomaticNetworkInstrumentation: false`.
 - Flutter web browser instrumentation, matching the Middleware browser SDK:
   document load and resource timings, `fetch` / `XMLHttpRequest` spans with
   trace-header propagation, Core Web Vitals (LCP, FCP, CLS, INP, TTFB), long

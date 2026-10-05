@@ -381,6 +381,13 @@ class FlutterOTel {
   /// (document load, fetch/XHR, web vitals, long tasks, page views, JS errors
   /// and console, WebSocket), mirroring the Middleware browser SDK. Ignored on
   /// other platforms.
+  /// [enableAutomaticNetworkInstrumentation] traces every HTTP request on
+  /// Android, iOS and desktop — `package:http`, `dio` and anything else built
+  /// on `dart:io`'s `HttpClient` — and adds trace headers, without wrapping
+  /// clients. Clients created before [initialize] aren't covered. Configure it
+  /// with [networkInstrumentationConfig]. Requests already traced by
+  /// `OTelHttpClient` / `OTelDioInterceptor` are left to them. On the web,
+  /// [webInstrumentation] covers network requests instead.
   static Future<void> initialize({
     String? appName,
     String? endpoint,
@@ -428,9 +435,13 @@ class FlutterOTel {
     bool enableAutoLogEvents = true,
     WebInstrumentationOptions webInstrumentation =
         const WebInstrumentationOptions(),
+    bool enableAutomaticNetworkInstrumentation = true,
+    HttpInstrumentationConfig networkInstrumentationConfig =
+        const HttpInstrumentationConfig(),
   }) async {
     _appName = appName ?? serviceName;
     WebInstrumentation.disable();
+    NetworkInstrumentation.disable();
     // Like the browser SDK, crawlers and headless browsers produce no RUM
     // data. The SDK still initializes so the app's own OTel calls work.
     final blockedBot =
@@ -664,6 +675,10 @@ class FlutterOTel {
 
     _enableAutoLogEvents = enableAutoLogEvents;
 
+    if (enableAutomaticNetworkInstrumentation) {
+      spanProcessor = NetworkInstrumentation.trackManualSpans(spanProcessor);
+    }
+
     await sdk.OTel.initialize(
       endpoint: endpoint,
       secure: secure,
@@ -783,6 +798,16 @@ class FlutterOTel {
 
     if (!blockedBot) {
       WebInstrumentation.enable(webInstrumentation);
+    }
+
+    if (enableAutomaticNetworkInstrumentation) {
+      try {
+        NetworkInstrumentation.enable(networkInstrumentationConfig);
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('Middleware: network instrumentation not enabled: $e');
+        }
+      }
     }
 
     if (enableAutomaticUserInteractions) {
@@ -1307,6 +1332,7 @@ class FlutterOTel {
     }
     AutomaticUserInteractionTracker.shutdown();
     WebInstrumentation.disable();
+    NetworkInstrumentation.disable();
     stopSessionRecording();
     _idleCheckTimer?.cancel();
     _idleCheckTimer = null;
@@ -1345,6 +1371,7 @@ class FlutterOTel {
     await sdk.OTel.reset();
     AutomaticUserInteractionTracker.shutdown();
     WebInstrumentation.disable();
+    NetworkInstrumentation.disable();
     _sessionManager?.dispose();
     _sessionManager = null;
     _enableAutoLogEvents = true;
