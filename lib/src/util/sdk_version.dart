@@ -5,4 +5,4 @@
 ///
 /// Dart can't read its own pubspec at runtime, so keep this equal to the
 /// `version:` in pubspec.yaml (test/sdk_version_test.dart checks it).
-const String middlewareFlutterSdkVersion = '2.1.2';
+const String middlewareFlutterSdkVersion = '2.1.3';
