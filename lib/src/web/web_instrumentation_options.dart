@@ -62,7 +62,7 @@ class WebInstrumentationOptions {
   /// responses. `x-access-token` is masked; [ignoreHeaders] are skipped.
   ///
   /// When null (the default) it follows the deprecated
-  /// [advanceNetworkCapture] if that is on, otherwise
+  /// `advanceNetworkCapture` if that is on, otherwise
   /// `FlutterOTel.initialize(captureNetworkHeaders: ...)` (off by default).
   final bool? captureNetworkHeaders;
 
@@ -71,7 +71,7 @@ class WebInstrumentationOptions {
   /// 8 KB). Request bodies are never recorded.
   ///
   /// When null (the default) it follows the deprecated
-  /// [advanceNetworkCapture] if that is on, otherwise
+  /// `advanceNetworkCapture` if that is on, otherwise
   /// `FlutterOTel.initialize(captureResponseBodies: ...)` (off by default).
   final bool? captureResponseBodies;
 
@@ -136,7 +136,7 @@ class WebInstrumentationOptions {
   );
 
   /// Header/body capture for the browser: each flag set here wins, then the
-  /// deprecated [advanceNetworkCapture], then the app-wide [defaults] from
+  /// deprecated `advanceNetworkCapture`, then the app-wide [defaults] from
   /// `FlutterOTel.initialize`. [ignoreHeaders] add to the defaults'.
   @internal
   NetworkCapture resolveNetworkCapture(NetworkCapture defaults) {
