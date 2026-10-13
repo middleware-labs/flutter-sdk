@@ -112,6 +112,17 @@ public class MiddlewareFlutterPlugin: NSObject, FlutterPlugin {
         if let recordingOptions = config["recordingOptions"] as? [String: Any] {
             _ = builder.recordingOptions(mapRecordingOptions(recordingOptions))
         }
+        // Header/body capture for requests the native SDK traces (URLSession).
+        // Off unless FlutterOTel.initialize turns it on.
+        if let enabled = config["captureNetworkHeaders"] as? Bool {
+            _ = builder.captureNetworkHeaders(enabled)
+        }
+        if let enabled = config["captureResponseBodies"] as? Bool {
+            _ = builder.captureResponseBodies(enabled)
+        }
+        if let names = config["ignoreHeaders"] as? [String], !names.isEmpty {
+            _ = builder.ignoreHeaders(names)
+        }
 
         // Inject the Dart-owned session BEFORE build() so the native SDK never
         // creates its own session (which would surface as a phantom session

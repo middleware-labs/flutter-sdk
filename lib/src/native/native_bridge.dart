@@ -49,7 +49,10 @@ class MiddlewareNativeBridge {
     }
   }
 
-  /// Initializes the native SDK. Returns native environment info
+  /// Initializes the native SDK. [captureNetworkHeaders],
+  /// [captureResponseBodies] and [ignoreHeaders] apply to requests the native
+  /// SDK traces itself (iOS `URLSession`, Android Middleware OkHttp call
+  /// factory), not to `dart:io` traffic. Returns native environment info
   /// ({initialized, appVersion, osVersion, deviceModel}) or null when the
   /// native SDK is unavailable or failed to start.
   static Future<Map<Object?, Object?>?> initNativeSdk({
@@ -65,6 +68,9 @@ class MiddlewareNativeBridge {
     Map<String, Object?>? recordingOptions,
     Map<String, Object?>? resourceAttributes,
     Map<String, Object?>? globalAttributes,
+    bool captureNetworkHeaders = false,
+    bool captureResponseBodies = false,
+    Set<String> ignoreHeaders = const <String>{},
   }) async {
     final response = await _invoke<Map<Object?, Object?>>('initNativeSdk', {
       'target': target,
@@ -84,6 +90,9 @@ class MiddlewareNativeBridge {
       if (recordingOptions != null) 'recordingOptions': recordingOptions,
       if (resourceAttributes != null) 'resourceAttributes': resourceAttributes,
       if (globalAttributes != null) 'globalAttributes': globalAttributes,
+      'captureNetworkHeaders': captureNetworkHeaders,
+      'captureResponseBodies': captureResponseBodies,
+      if (ignoreHeaders.isNotEmpty) 'ignoreHeaders': ignoreHeaders.toList(),
     });
     if (response == null || response['initialized'] != true) return null;
     return response;

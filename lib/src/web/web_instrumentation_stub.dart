@@ -2,6 +2,7 @@
 
 // Non-web builds: browser instrumentation does not exist.
 
+import '../common/network_capture.dart';
 import 'web_instrumentation_options.dart';
 
 bool isBotTraffic() => false;
@@ -13,6 +14,7 @@ Map<String, Object> browserResourceAttributes() => const {};
 void enable(
   WebInstrumentationOptions options, {
   required List<Pattern> ignoreUrls,
+  required NetworkCapture networkCapture,
 }) {}
 
 void disable() {}

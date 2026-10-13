@@ -39,6 +39,8 @@ void main() {
         sessionRecording: true,
         sessionSamplingRatio: 1.0,
         recordingOptions: const {'frequency': 'standard'},
+        captureNetworkHeaders: true,
+        ignoreHeaders: const {'Authorization'},
       );
 
       expect(received?.method, 'initNativeSdk');
@@ -51,7 +53,30 @@ void main() {
       expect(args['sessionRecording'], true);
       expect(args['sessionSamplingRatio'], 1.0);
       expect((args['recordingOptions'] as Map)['frequency'], 'standard');
+      expect(args['captureNetworkHeaders'], true);
+      expect(args['captureResponseBodies'], false);
+      expect(args['ignoreHeaders'], ['Authorization']);
       expect(info?['appVersion'], '1.2.3');
+    });
+
+    test('initNativeSdk sends capture off by default', () async {
+      MethodCall? received;
+      messenger.setMockMethodCallHandler(MiddlewareNativeBridge.channel, (
+        call,
+      ) async {
+        received = call;
+        return <Object?, Object?>{'initialized': true};
+      });
+      await MiddlewareNativeBridge.initNativeSdk(
+        target: 't',
+        accountKey: 'k',
+        serviceName: 's',
+        projectName: 'p',
+      );
+      final args = received!.arguments as Map<Object?, Object?>;
+      expect(args['captureNetworkHeaders'], false);
+      expect(args['captureResponseBodies'], false);
+      expect(args.containsKey('ignoreHeaders'), isFalse);
     });
 
     test('initNativeSdk returns null when native init fails', () async {

@@ -1,6 +1,41 @@
 # Changelog
 
-## Unreleased
+## 2.2.0
+
+- Requires the native SDKs with the same capture options: Android
+  `io.github.middleware-labs:android-sdk` 3.2.0 (was 3.1.8) and iOS
+  `MiddlewareRum` 2.3.0 (was 2.2.6).
+- Opt-in header and response-body capture on network spans, split like the
+  Middleware browser SDK: `FlutterOTel.initialize(captureNetworkHeaders:,
+  captureResponseBodies:, ignoreHeaders:)`, all off by default.
+  - `captureNetworkHeaders` records request and response headers as
+    `http.request.header.<name>` / `http.response.header.<name>` (lowercase,
+    `-` → `_`, `x-access-token` masked as `********`, `ignoreHeaders` skipped).
+  - `captureResponseBodies` records `http.response.body` for
+    `application/json`, `*+json` and `text/plain` responses.
+  - Android/iOS/desktop: the automatic `dart:io` instrumentation now honours
+    both. Response bodies are teed off the stream the app reads (first 64
+    KiB, UTF-8) without changing what the app receives. With
+    `captureNetworkHeaders` every header is recorded unless
+    `HttpInstrumentationConfig.capturedHeaders` was changed from its default;
+    the config's existing `captureRequestHeaders` / `captureResponseHeaders`
+    keep working as before. Captured header keys now use `_` instead of `-`
+    (`http.request.header.content_type`), matching the browser SDK, and the
+    SDK's own trace headers are no longer recorded as request headers.
+  - Web: `WebInstrumentationOptions` gains `captureNetworkHeaders` and
+    `captureResponseBodies` (they default to the `initialize` values).
+    `advanceNetworkCapture` is deprecated; when the new flags are unset it
+    turns both on, as before. `Server-Timing` trace links are read only with
+    header capture on. `text/x-component` bodies are no longer captured, and
+    the `x-access-token` mask is now `********`.
+  - Request bodies are no longer captured (`http.request.body` was recorded
+    by the web fetch/XHR instrumentation under `advanceNetworkCapture`).
+  - Android/iOS: the same three options are passed to the native SDKs, so
+    requests they trace themselves (iOS `URLSession` traffic from native
+    plugins; Android requests made through Middleware's OkHttp call factory)
+    follow them too.
+
+## 2.1.1 – 2.1.3
 
 - HTTP requests are traced automatically on Android, iOS and desktop. Before
   this, only clients wrapped with `instrument()` / `addOTelInstrumentation()`

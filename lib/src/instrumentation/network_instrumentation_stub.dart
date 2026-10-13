@@ -5,9 +5,11 @@
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
     show HttpInstrumentationConfig, SpanProcessor;
 
+import '../common/network_capture.dart';
+
 bool get isActive => false;
 
-void enable(HttpInstrumentationConfig config) {}
+void enable(HttpInstrumentationConfig config, {NetworkCapture? capture}) {}
 
 void disable() {}
 

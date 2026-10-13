@@ -15,6 +15,7 @@ import 'package:middleware_flutter_opentelemetry/src/logs/ui_logger_provider.dar
 import 'package:middleware_flutter_opentelemetry/src/semantics/flutter_semantics.dart';
 import 'package:middleware_flutter_opentelemetry/src/util/sdk_version.dart';
 import 'package:middleware_flutter_opentelemetry/src/web/web_instrumentation.dart';
+import 'package:middleware_flutter_opentelemetry/src/common/network_capture.dart';
 
 typedef CommonAttributesFunction = Attributes Function();
 
@@ -388,6 +389,18 @@ class FlutterOTel {
   /// with [networkInstrumentationConfig]. Requests already traced by
   /// `OTelHttpClient` / `OTelDioInterceptor` are left to them. On the web,
   /// [webInstrumentation] covers network requests instead.
+  ///
+  /// [captureNetworkHeaders] records request and response headers on network
+  /// spans (`http.request.header.<name>` / `http.response.header.<name>`,
+  /// lowercase with `-` replaced by `_`; `x-access-token` is masked).
+  /// [captureResponseBodies] records `application/json`, `*+json` and
+  /// `text/plain` response bodies as `http.response.body` (up to 64 KiB on
+  /// Android/iOS/desktop, 8 KB on the web). Header names in [ignoreHeaders]
+  /// (case-insensitive) are never recorded. Both are off by default since
+  /// headers and bodies can carry credentials and personal data; request
+  /// bodies are never recorded. They apply on every platform; on the web,
+  /// [WebInstrumentationOptions.captureNetworkHeaders] /
+  /// [WebInstrumentationOptions.captureResponseBodies] override them when set.
   static Future<void> initialize({
     String? appName,
     String? endpoint,
@@ -438,6 +451,9 @@ class FlutterOTel {
     bool enableAutomaticNetworkInstrumentation = true,
     HttpInstrumentationConfig networkInstrumentationConfig =
         const HttpInstrumentationConfig(),
+    bool captureNetworkHeaders = false,
+    bool captureResponseBodies = false,
+    Set<String> ignoreHeaders = const <String>{},
   }) async {
     _appName = appName ?? serviceName;
     WebInstrumentation.disable();
@@ -722,6 +738,11 @@ class FlutterOTel {
         sessionSamplingRatio: sessionSamplingRatio,
         recordingOptions: recordingOptions.toNativeMap(),
         globalAttributes: {'mw.rum.sdk.version': middlewareFlutterSdkVersion},
+        // For requests the native SDKs trace (native plugins' URLSession /
+        // Middleware OkHttp traffic); dart:io requests are handled above.
+        captureNetworkHeaders: captureNetworkHeaders,
+        captureResponseBodies: captureResponseBodies,
+        ignoreHeaders: ignoreHeaders,
       );
       _nativeSdkActive = nativeInfo != null;
       if (_nativeSdkActive) {
@@ -797,12 +818,24 @@ class FlutterOTel {
     }
 
     if (!blockedBot) {
-      WebInstrumentation.enable(webInstrumentation);
+      WebInstrumentation.enable(
+        webInstrumentation,
+        networkCapture: NetworkCapture(
+          headers: captureNetworkHeaders,
+          responseBodies: captureResponseBodies,
+          ignoreHeaders: ignoreHeaders,
+        ),
+      );
     }
 
     if (enableAutomaticNetworkInstrumentation) {
       try {
-        NetworkInstrumentation.enable(networkInstrumentationConfig);
+        NetworkInstrumentation.enable(
+          networkInstrumentationConfig,
+          captureNetworkHeaders: captureNetworkHeaders,
+          captureResponseBodies: captureResponseBodies,
+          ignoreHeaders: ignoreHeaders,
+        );
       } catch (e) {
         if (kDebugMode) {
           debugPrint('Middleware: network instrumentation not enabled: $e');

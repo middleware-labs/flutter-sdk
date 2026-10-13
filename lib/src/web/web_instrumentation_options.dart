@@ -1,7 +1,10 @@
 // Licensed under the Apache License, Version 2.0
 
+import 'package:meta/meta.dart' show internal;
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart'
     show TracePropagationFormat;
+
+import '../common/network_capture.dart';
 
 // One enum for web and mobile: the web options take it here, and the mobile
 // `HttpInstrumentationConfig` (OTelHttpClient / OTelDioInterceptor) takes the
@@ -13,13 +16,17 @@ export 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart
 /// SDK (`@middleware.io/browser`). Ignored on every other platform.
 ///
 /// Pass it to `FlutterOTel.initialize(webInstrumentation: ...)`. Every
-/// instrumentation is on by default except [advanceNetworkCapture], which
-/// records request/response headers and bodies (credentials, personal data).
+/// instrumentation is on by default except [captureNetworkHeaders] and
+/// [captureResponseBodies], which record request/response headers and
+/// response bodies (credentials, personal data).
 class WebInstrumentationOptions {
   const WebInstrumentationOptions({
     this.enabled = true,
     this.documentLoad = true,
     this.network = true,
+    this.captureNetworkHeaders,
+    this.captureResponseBodies,
+    @Deprecated('Use captureNetworkHeaders and captureResponseBodies')
     this.advanceNetworkCapture = false,
     this.ignoreHeaders = const <String>{},
     this.ignoreUrls = const <Pattern>[],
@@ -49,11 +56,33 @@ class WebInstrumentationOptions {
   /// is covered without wrapping it.
   final bool network;
 
-  /// Also capture request/response headers and bodies on network spans.
-  /// Off by default: bodies may carry PII.
+  /// Record request and response headers on network spans as
+  /// `http.request.header.<name>` / `http.response.header.<name>` (lowercase,
+  /// `-` replaced with `_`), and read `Server-Timing` trace links from XHR
+  /// responses. `x-access-token` is masked; [ignoreHeaders] are skipped.
+  ///
+  /// When null (the default) it follows the deprecated
+  /// `advanceNetworkCapture` if that is on, otherwise
+  /// `FlutterOTel.initialize(captureNetworkHeaders: ...)` (off by default).
+  final bool? captureNetworkHeaders;
+
+  /// Record response bodies as `http.response.body` when the response's
+  /// `Content-Type` is `application/json`, `*+json` or `text/plain` (capped at
+  /// 8 KB). Request bodies are never recorded.
+  ///
+  /// When null (the default) it follows the deprecated
+  /// `advanceNetworkCapture` if that is on, otherwise
+  /// `FlutterOTel.initialize(captureResponseBodies: ...)` (off by default).
+  final bool? captureResponseBodies;
+
+  /// Turns on both [captureNetworkHeaders] and [captureResponseBodies] when
+  /// they are left unset.
+  @Deprecated('Use captureNetworkHeaders and captureResponseBodies')
   final bool advanceNetworkCapture;
 
-  /// Header names (case-insensitive) never captured by [advanceNetworkCapture].
+  /// Header names (case-insensitive) never captured by
+  /// [captureNetworkHeaders], in addition to
+  /// `FlutterOTel.initialize(ignoreHeaders: ...)`.
   final Set<String> ignoreHeaders;
 
   /// URLs (RegExp or exact String) that are never instrumented. The SDK's own
@@ -105,4 +134,19 @@ class WebInstrumentationOptions {
   static const WebInstrumentationOptions disabled = WebInstrumentationOptions(
     enabled: false,
   );
+
+  /// Header/body capture for the browser: each flag set here wins, then the
+  /// deprecated `advanceNetworkCapture`, then the app-wide [defaults] from
+  /// `FlutterOTel.initialize`. [ignoreHeaders] add to the defaults'.
+  @internal
+  NetworkCapture resolveNetworkCapture(NetworkCapture defaults) {
+    // ignore: deprecated_member_use_from_same_package
+    final legacy = advanceNetworkCapture ? true : null;
+    return NetworkCapture(
+      headers: captureNetworkHeaders ?? legacy ?? defaults.headers,
+      responseBodies:
+          captureResponseBodies ?? legacy ?? defaults.responseBodies,
+      ignoreHeaders: {...defaults.ignoreHeaders, ...ignoreHeaders},
+    );
+  }
 }

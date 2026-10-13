@@ -15,30 +15,44 @@
 //
 // Nothing here may break a request: every instrumentation step is guarded and
 // falls back to the plain client.
+//
+// Opt-in capture (`captureNetworkHeaders`, `captureResponseBodies`) follows
+// the browser SDK: all request/response headers but `ignoreHeaders`, and JSON
+// / plain-text response bodies teed off the stream the app reads.
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 
+import '../common/network_capture.dart';
 import '../web/web_utils.dart' show defaultIgnoredUrls;
+
+/// Bytes of a response body kept for `http.response.body`.
+const int maxCapturedBodyBytes = 64 * 1024;
 
 _OTelHttpOverrides? _overrides;
 _ManualHttpSpanTracker? _tracker;
 
 bool get isActive => _overrides?.enabled ?? false;
 
-void enable(HttpInstrumentationConfig config) {
+void enable(HttpInstrumentationConfig config, {NetworkCapture? capture}) {
+  capture ??= NetworkCapture.none;
   final installed = _overrides;
   if (installed != null && identical(HttpOverrides.current, installed)) {
-    installed.configure(config);
+    installed.configure(config, capture);
   } else {
     // Something replaced our overrides since the last enable (or this is the
     // first): chain whatever is installed now, e.g. an app's
     // badCertificateCallback overrides.
     installed?.enabled = false;
-    final overrides = _OTelHttpOverrides(HttpOverrides.current, config);
+    final overrides = _OTelHttpOverrides(
+      HttpOverrides.current,
+      config,
+      capture,
+    );
     HttpOverrides.global = overrides;
     _overrides = overrides;
   }
@@ -64,17 +78,23 @@ void disable() {
 }
 
 class _OTelHttpOverrides extends HttpOverrides {
-  _OTelHttpOverrides(this.previous, HttpInstrumentationConfig config) {
-    configure(config);
+  _OTelHttpOverrides(
+    this.previous,
+    HttpInstrumentationConfig config,
+    NetworkCapture capture,
+  ) {
+    configure(config, capture);
   }
 
   final HttpOverrides? previous;
   bool enabled = true;
   late HttpInstrumentationConfig config;
+  late _CapturePolicy capture;
   late TextMapPropagator<Map<String, String>, String> propagator;
 
-  void configure(HttpInstrumentationConfig config) {
+  void configure(HttpInstrumentationConfig config, NetworkCapture capture) {
     this.config = config;
+    this.capture = _CapturePolicy(config, capture);
     propagator = _propagatorFor(config.tracePropagationFormat);
   }
 
@@ -88,6 +108,43 @@ class _OTelHttpOverrides extends HttpOverrides {
   String findProxyFromEnvironment(Uri url, Map<String, String>? environment) =>
       previous?.findProxyFromEnvironment(url, environment) ??
       super.findProxyFromEnvironment(url, environment);
+}
+
+/// `HttpInstrumentationConfig`'s header options combined with the SDK's
+/// `captureNetworkHeaders` / `captureResponseBodies` / `ignoreHeaders`.
+///
+/// `captureNetworkHeaders` turns on both directions and records every header
+/// (browser parity) unless the app replaced `capturedHeaders`' default
+/// allowlist, which then still applies. Without it, the config's own
+/// `captureRequestHeaders` / `captureResponseHeaders` keep recording the
+/// `capturedHeaders` allowlist as before.
+class _CapturePolicy {
+  _CapturePolicy(HttpInstrumentationConfig config, this.capture)
+    : requestHeaders = capture.headers || config.captureRequestHeaders,
+      responseHeaders = capture.headers || config.captureResponseHeaders,
+      headerNames =
+          capture.headers && _isDefaultAllowlist(config.capturedHeaders)
+              ? null
+              : config.capturedHeaders.map((h) => h.toLowerCase()).toSet();
+
+  final NetworkCapture capture;
+  final bool requestHeaders;
+  final bool responseHeaders;
+
+  /// Headers recorded; null records all of them.
+  final Set<String>? headerNames;
+
+  bool get responseBodies => capture.responseBodies;
+
+  static const Set<String> _defaultAllowlist = <String>{
+    'content-type',
+    'content-length',
+    'user-agent',
+  };
+
+  static bool _isDefaultAllowlist(Set<String> names) =>
+      names.length == _defaultAllowlist.length &&
+      names.every((n) => _defaultAllowlist.contains(n.toLowerCase()));
 }
 
 /// Spans started by the opt-in wrappers (`OTelHttpClient`,
@@ -187,6 +244,7 @@ class _OTelHttpClient implements HttpClient {
         span = _RequestSpan(
           tracker == null ? start() : tracker.startOwnSpan(start),
           config,
+          overrides.capture,
         );
       }
     } catch (_) {
@@ -517,6 +575,7 @@ class _OTelHttpClientResponse extends Stream<List<int>>
       final source = _inner.listen(
         (chunk) {
           received += chunk.length;
+          _span.onBodyChunk(chunk);
           controller.add(chunk);
         },
         onError: (Object error, StackTrace stack) {
@@ -527,6 +586,7 @@ class _OTelHttpClientResponse extends Stream<List<int>>
           _span.end(
             responseBodySize:
                 _inner.contentLength >= 0 ? _inner.contentLength : received,
+            bodyComplete: true,
           );
           controller.close();
         },
@@ -602,12 +662,19 @@ class _OTelHttpClientResponse extends Stream<List<int>>
 }
 
 class _RequestSpan {
-  _RequestSpan(this._span, this._config);
+  _RequestSpan(this._span, this._config, this._capture);
 
   final Span _span;
   final HttpInstrumentationConfig _config;
+  final _CapturePolicy _capture;
   int? _statusCode;
   bool _ended = false;
+
+  /// Trace headers this SDK added, left out of captured request headers.
+  final Set<String> _injected = <String>{};
+
+  /// The response body so far, when it is one `captureResponseBodies` keeps.
+  BytesBuilder? _body;
 
   void injectHeaders(
     HttpClientRequest request,
@@ -620,7 +687,10 @@ class _RequestSpan {
         carrier,
         _MapSetter(carrier),
       );
-      carrier.forEach((name, value) => request.headers.set(name, value));
+      carrier.forEach((name, value) {
+        request.headers.set(name, value);
+        _injected.add(name.toLowerCase());
+      });
     } catch (_) {}
   }
 
@@ -631,8 +701,8 @@ class _RequestSpan {
       if (_config.captureRequestBodySize && request.contentLength >= 0) {
         attributes['http.request.body.size'] = request.contentLength;
       }
-      if (_config.captureRequestHeaders) {
-        _addHeaders(attributes, 'http.request.header', request.headers);
+      if (_capture.requestHeaders) {
+        _addHeaders(attributes, 'request', request.headers, skip: _injected);
       }
       if (attributes.isNotEmpty) _span.addAttributes(attributes.toAttributes());
     } catch (_) {}
@@ -645,24 +715,61 @@ class _RequestSpan {
       final attributes = <String, Object>{
         'http.response.status_code': response.statusCode,
       };
-      if (_config.captureResponseHeaders) {
-        _addHeaders(attributes, 'http.response.header', response.headers);
+      if (_capture.responseHeaders) {
+        _addHeaders(attributes, 'response', response.headers);
       }
       _span.addAttributes(attributes.toAttributes());
     } catch (_) {}
+    try {
+      // Still-compressed bytes (autoUncompress off) aren't text.
+      if (_capture.responseBodies &&
+          response.compressionState !=
+              HttpClientResponseCompressionState.compressed &&
+          isCapturedBodyType(
+            response.headers[HttpHeaders.contentTypeHeader]?.first,
+          )) {
+        _body = BytesBuilder();
+      }
+    } catch (_) {}
   }
 
-  void end({int? responseBodySize, Object? error, StackTrace? stack}) {
+  /// Keeps a copy of the first [maxCapturedBodyBytes] the app receives.
+  void onBodyChunk(List<int> chunk) {
+    final body = _body;
+    if (body == null || _ended) return;
+    try {
+      final room = maxCapturedBodyBytes - body.length;
+      if (room <= 0) return;
+      // BytesBuilder copies, so the app may reuse its buffers.
+      body.add(chunk.length <= room ? chunk : chunk.sublist(0, room));
+    } catch (_) {
+      _body = null;
+    }
+  }
+
+  void end({
+    int? responseBodySize,
+    bool bodyComplete = false,
+    Object? error,
+    StackTrace? stack,
+  }) {
     if (_ended) return;
     _ended = true;
     try {
+      final attributes = <String, Object>{};
       if (responseBodySize != null && _config.captureResponseBodySize) {
-        _span.addAttributes(
-          <String, Object>{
-            'http.response.body.size': responseBodySize,
-          }.toAttributes(),
-        );
+        attributes['http.response.body.size'] = responseBodySize;
       }
+      final body = _body;
+      _body = null;
+      // A body the app stopped reading (cancel, redirect) is left out.
+      if (body != null && bodyComplete && error == null) {
+        final text = utf8.decode(body.takeBytes(), allowMalformed: true).trim();
+        if (text.isNotEmpty) attributes['http.response.body'] = text;
+      }
+      if (attributes.isNotEmpty) _span.addAttributes(attributes.toAttributes());
+    } catch (_) {}
+    try {
       final statusCode = _statusCode;
       if (error != null) {
         _span.recordException(error, stackTrace: stack);
@@ -681,15 +788,29 @@ class _RequestSpan {
     } catch (_) {}
   }
 
+  /// `http.{type}.header.<name>`: every header, or the allowlist, minus
+  /// `ignoreHeaders` and [skip]. Values of a repeated header are joined.
   void _addHeaders(
     Map<String, Object> attributes,
-    String prefix,
-    HttpHeaders headers,
-  ) {
-    for (final name in _config.capturedHeaders) {
-      final values = headers[name];
-      if (values != null && values.isNotEmpty) {
-        attributes['$prefix.$name'] = values.join(', ');
+    String type,
+    HttpHeaders headers, {
+    Set<String> skip = const <String>{},
+  }) {
+    void add(String name, List<String> values) {
+      final lower = name.toLowerCase();
+      if (values.isEmpty || skip.contains(lower)) return;
+      final key = _capture.capture.headerKey(type, lower);
+      if (key == null) return;
+      attributes[key] = headerAttributeValue(lower, values.join(', '));
+    }
+
+    final names = _capture.headerNames;
+    if (names == null) {
+      headers.forEach(add);
+    } else {
+      for (final name in names) {
+        final values = headers[name];
+        if (values != null) add(name, values);
       }
     }
   }
