@@ -8,6 +8,7 @@ import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart
     as sdk;
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 
+import '../../common/network_capture.dart';
 import '../../flutterrific_otel.dart';
 import '../web_instrumentation_options.dart';
 import '../web_telemetry.dart';
@@ -18,12 +19,6 @@ import 'js_helpers.dart';
 /// browser queues after the response settles (upstream OTel uses 300ms).
 const _resourceTimingWait = Duration(milliseconds: 300);
 
-const _capturableContentTypes = {
-  'application/json',
-  'text/plain',
-  'text/x-component',
-};
-
 final RegExp _serverTimingTraceparent = RegExp(
   '''traceparent;desc=['"]00-([0-9a-f]{32})-([0-9a-f]{16})-01['"]''',
 );
@@ -32,15 +27,20 @@ final RegExp _serverTimingTraceparent = RegExp(
 /// `package:http`, `dio`, Flutter's asset loader and any JS library are all
 /// covered. Mirrors the browser SDK's fetch/XHR instrumentations: span name
 /// `{METHOD} {host}{path}`, `event.type` fetch|xhr, `resource.*` timings,
-/// click attribution and (opt-in) header/body capture.
+/// click attribution and (opt-in) header / response-body capture.
 class NetworkInstrumentation {
-  NetworkInstrumentation({required this.options, required this.ignoreUrls})
-    : _ignoreHeaders =
-          options.ignoreHeaders.map((h) => h.toLowerCase()).toSet();
+  NetworkInstrumentation({
+    required this.options,
+    required this.ignoreUrls,
+    required this.capture,
+  });
 
   final WebInstrumentationOptions options;
   final List<Pattern> ignoreUrls;
-  final Set<String> _ignoreHeaders;
+
+  /// Resolved `captureNetworkHeaders` / `captureResponseBodies` /
+  /// `ignoreHeaders`.
+  final NetworkCapture capture;
 
   JSFunction? _origFetch;
   final List<Disposer> _restoreXhr = [];
@@ -116,10 +116,9 @@ class NetworkInstrumentation {
     String name,
     String value,
   ) {
-    final lower = name.toLowerCase();
-    if (_ignoreHeaders.contains(lower)) return;
-    out['http.$type.header.${lower.replaceAll('-', '_')}'] =
-        lower == 'x-access-token' ? '*****' : value;
+    final key = capture.headerKey(type, name);
+    if (key == null) return;
+    out[key] = headerAttributeValue(name, value);
   }
 
   void _captureServerTiming(Map<String, Object> out, String? serverTiming) {
@@ -299,8 +298,9 @@ class NetworkInstrumentation {
   }
 
   /// Returns the init to call the original fetch with, with trace headers
-  /// injected (never mutating the caller's objects) and request details
-  /// captured into [captured] when advanced capture is on.
+  /// injected (never mutating the caller's objects) and request headers
+  /// captured into [captured] when header capture is on. Request bodies are
+  /// never captured.
   JSAny? _prepareFetchInit(
     sdk.Span span,
     String url,
@@ -312,20 +312,13 @@ class NetworkInstrumentation {
     final hasInit = init != null && init.isA<JSObject>();
     final initObj = hasInit ? init as JSObject : null;
 
-    if (options.advanceNetworkCapture) {
+    if (capture.headers) {
       final headersSource =
           jsGet(initObj, 'headers') ??
           (isRequest ? jsGet(input as JSObject, 'headers') : null);
       _forEachHeader(headersSource, (name, value) {
         _captureHeader(captured, 'request', name, value);
       });
-      final body = jsGet(initObj, 'body');
-      if (body != null) {
-        captured['http.request.body'] =
-            jsInstanceOf(body, 'ReadableStream')
-                ? '[ReadableStream]'
-                : limitLen(jsToString(body), messageLimit * 8);
-      }
     }
 
     if (!_propagate(url)) return init;
@@ -386,40 +379,35 @@ class NetworkInstrumentation {
         attrs['error.type'] = '$status';
         span.setStatus(SpanStatusCode.Error);
       }
-      if (options.advanceNetworkCapture) {
+      if (capture.headers) {
         _forEachHeader(headers, (name, value) {
           _captureHeader(attrs, 'response', name, value);
         });
         _captureServerTiming(attrs, _getHeader(headers, 'server-timing'));
-        final contentType =
-            (_getHeader(headers, 'content-type') ?? '')
-                .split(';')
-                .first
-                .trim()
-                .toLowerCase();
-        if (_capturableContentTypes.contains(contentType)) {
-          bodyPending = true;
-          _readFetchBody(res)
-              .then((text) {
-                if (text != null && text.trim().isNotEmpty) {
-                  attrs['http.response.body'] = limitLen(
-                    text.trim(),
-                    messageLimit * 8,
-                  );
-                }
-              })
-              .whenComplete(() {
-                WebTelemetry.setAttributes(span, attrs);
-                _finish(
-                  span,
-                  url: url,
-                  startPerf: startPerf,
-                  endPerf: endPerf,
-                  endTime: endTime,
-                  initiatorType: 'fetch',
+      }
+      if (capture.responseBodies &&
+          isCapturedBodyType(_getHeader(headers, 'content-type'))) {
+        bodyPending = true;
+        _readFetchBody(res)
+            .then((text) {
+              if (text != null && text.trim().isNotEmpty) {
+                attrs['http.response.body'] = limitLen(
+                  text.trim(),
+                  messageLimit * 8,
                 );
-              });
-        }
+              }
+            })
+            .whenComplete(() {
+              WebTelemetry.setAttributes(span, attrs);
+              _finish(
+                span,
+                url: url,
+                startPerf: startPerf,
+                endPerf: endPerf,
+                endTime: endTime,
+                initiatorType: 'fetch',
+              );
+            });
       }
     }
     if (bodyPending) return;
@@ -472,12 +460,12 @@ class NetworkInstrumentation {
       }),
     );
 
-    // Trace headers go through the unpatched setter so advanced capture
+    // Trace headers go through the unpatched setter so header capture
     // doesn't record the SDK's own headers.
     final origSetHeader = jsGet(proto, 'setRequestHeader');
     _restoreXhr.add(
       patchMethod(proto, 'setRequestHeader', (original, thisArg, args) {
-        if (options.advanceNetworkCapture) {
+        if (capture.headers) {
           final state = _stateOf(thisArg);
           final list = jsArgs(args);
           if (state != null && list.length >= 2) {
@@ -500,13 +488,7 @@ class NetworkInstrumentation {
             state.span == null &&
             !isUrlIgnored(state.url, ignoreUrls)) {
           try {
-            final list = jsArgs(args);
-            _startXhr(
-              thisArg as JSObject,
-              state,
-              list.isEmpty ? null : list[0],
-              origSetHeader as JSFunction,
-            );
+            _startXhr(thisArg as JSObject, state, origSetHeader as JSFunction);
           } catch (_) {}
         }
         return reflectApply(original, thisArg, args);
@@ -526,12 +508,7 @@ class NetworkInstrumentation {
     }
   }
 
-  void _startXhr(
-    JSObject xhr,
-    _XhrState state,
-    JSAny? body,
-    JSFunction origSetHeader,
-  ) {
+  void _startXhr(JSObject xhr, _XhrState state, JSFunction origSetHeader) {
     final span = state.span = _startSpan(state.method, state.url, 'xhr');
     final startPerf = perfNow();
     if (_propagate(state.url)) {
@@ -540,12 +517,6 @@ class NetworkInstrumentation {
           origSetHeader.callAsFunction(xhr, e.key.toJS, e.value.toJS);
         } catch (_) {}
       }
-    }
-    if (options.advanceNetworkCapture && body != null) {
-      state.captured['http.request.body'] = limitLen(
-        jsToString(body),
-        messageLimit * 8,
-      );
     }
 
     String? failure;
@@ -566,9 +537,8 @@ class NetworkInstrumentation {
         attrs['error.type'] = '$status';
         span.setStatus(SpanStatusCode.Error);
       }
-      if (options.advanceNetworkCapture) {
-        _captureXhrResponse(xhr, attrs);
-      }
+      if (capture.headers) _captureXhrHeaders(xhr, attrs);
+      if (capture.responseBodies) _captureXhrBody(xhr, attrs);
       WebTelemetry.setAttributes(span, attrs);
       _finish(
         span,
@@ -581,7 +551,7 @@ class NetworkInstrumentation {
     });
   }
 
-  void _captureXhrResponse(JSObject xhr, Map<String, Object> attrs) {
+  void _captureXhrHeaders(JSObject xhr, Map<String, Object> attrs) {
     try {
       final raw = xhr.callMethod<JSString>('getAllResponseHeaders'.toJS).toDart;
       for (final line in raw.split(RegExp(r'[\r\n]+'))) {
@@ -598,16 +568,39 @@ class NetworkInstrumentation {
         }
       }
     } catch (_) {}
+  }
+
+  /// JSON and plain-text response bodies, read as the app reads them.
+  void _captureXhrBody(JSObject xhr, Map<String, Object> attrs) {
     try {
+      final contentType = xhr.callMethod<JSAny?>(
+        'getResponseHeader'.toJS,
+        'content-type'.toJS,
+      );
+      final type0 =
+          contentType != null && contentType.isA<JSString>()
+              ? (contentType as JSString).toDart
+              : null;
+      if (!isCapturedBodyType(type0)) return;
       final type = jsStr(xhr, 'responseType') ?? '';
+      String? text;
       if (type == '' || type == 'text') {
-        final text = jsStr(xhr, 'responseText');
-        if (text != null && text.isNotEmpty) {
-          attrs['http.response.body'] = limitLen(text, messageLimit * 8);
+        text = jsStr(xhr, 'responseText');
+      } else if (type == 'json') {
+        final response = jsGet(xhr, 'response');
+        if (response != null) {
+          final json = (globalContext['JSON'] as JSObject).callMethod<JSAny?>(
+            'stringify'.toJS,
+            response,
+          );
+          if (json.isA<JSString>()) text = (json as JSString).toDart;
         }
       }
+      if (text != null && text.trim().isNotEmpty) {
+        attrs['http.response.body'] = limitLen(text.trim(), messageLimit * 8);
+      }
     } catch (_) {
-      // responseText throws for non-text response types
+      // responseText throws for responseType other than "" / "text"
     }
   }
 

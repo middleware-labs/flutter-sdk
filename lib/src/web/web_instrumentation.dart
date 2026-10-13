@@ -3,6 +3,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:middleware_dart_opentelemetry/middleware_dart_opentelemetry.dart';
 
+import '../common/network_capture.dart';
 import 'web_instrumentation_options.dart';
 import 'web_utils.dart';
 import 'web_instrumentation_stub.dart'
@@ -26,13 +27,21 @@ class WebInstrumentation {
   static Map<String, Object> resourceAttributes() =>
       kIsWeb ? impl.browserResourceAttributes() : const {};
 
-  static void enable(WebInstrumentationOptions options) {
+  /// [networkCapture] is the app-wide header/body capture from
+  /// `FlutterOTel.initialize`; [options] can override it.
+  static void enable(
+    WebInstrumentationOptions options, {
+    NetworkCapture? networkCapture,
+  }) {
     if (!kIsWeb) return;
     _options = options;
     InteractionContext.clear();
     impl.enable(
       options,
       ignoreUrls: <Pattern>[...defaultIgnoredUrls, ...options.ignoreUrls],
+      networkCapture: options.resolveNetworkCapture(
+        networkCapture ?? NetworkCapture.none,
+      ),
     );
   }
 

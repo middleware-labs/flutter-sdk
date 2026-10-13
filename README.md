@@ -314,7 +314,10 @@ desktop.
 |--------|---------|-----------------|
 | `documentLoad` | on | `documentLoad` trace from Navigation Timing (`documentFetch` + one span per resource), plus resources loaded later (CanvasKit, fonts, images) with `resource.post_load=true` |
 | `network` | on | `fetch` and `XMLHttpRequest` spans (`GET host/path`, `event.type=fetch\|xhr`, `resource.*` timings). Patched in the browser, so `package:http`, `dio` and Flutter's asset loading are all covered without wrapping clients |
-| `advanceNetworkCapture` | off | request/response headers and bodies on network spans |
+| `captureNetworkHeaders` | off (or the `initialize` value) | request/response headers on network spans; see [Headers and response bodies](#headers-and-response-bodies) |
+| `captureResponseBodies` | off (or the `initialize` value) | JSON / plain-text response bodies on network spans |
+| `ignoreHeaders` | none | header names never captured (added to the `initialize` list) |
+| `advanceNetworkCapture` | off | **deprecated**: turns on both `captureNetworkHeaders` and `captureResponseBodies` when they are unset |
 | `tracePropagationTargets` | same origin | cross-origin URLs that get `traceparent` / `b3` headers (their CORS policy must allow them) |
 | `webVitals` | on | LCP, FCP, CLS, INP and TTFB with attribution |
 | `longTask` | on | main-thread tasks over 50ms |
@@ -369,6 +372,43 @@ final client = http.Client().instrument(
 Use `shouldInstrument: (url) => ...` to skip URLs. Skipped requests get no
 span and no headers. On web the browser instrumentation already covers every
 client, so wrap only when `!kIsWeb` to avoid a second span per request.
+
+### Headers and response bodies
+
+Network spans carry method, URL, status, body sizes and timings. Headers and
+response bodies can contain credentials and personal data, so they are
+recorded only when you opt in, the same way as in the Middleware browser SDK:
+
+```dart
+await FlutterOTel.initialize(
+  // ...
+  captureNetworkHeaders: true,   // request + response headers
+  captureResponseBodies: true,   // JSON and text/plain response bodies
+  ignoreHeaders: {'Authorization', 'Cookie', 'Set-Cookie'},
+);
+```
+
+| Option | Default | What it records |
+|--------|---------|-----------------|
+| `captureNetworkHeaders` | off | every request and response header as `http.request.header.<name>` / `http.response.header.<name>` (lowercase, `-` becomes `_`; repeated headers joined with `, `). `x-access-token` is recorded as `********` |
+| `captureResponseBodies` | off | `http.response.body` when the response `Content-Type` is `application/json`, `*+json` or `text/plain`. Capped at 64 KiB on Android/iOS/desktop (the app still reads the full body) and 8 KB on the web |
+| `ignoreHeaders` | none | header names (case-insensitive) never recorded |
+
+Request bodies are never recorded.
+
+These apply to every platform: the automatic `dart:io` instrumentation on
+Android, iOS and desktop, and the browser fetch/XHR instrumentation on the
+web. On the web, `WebInstrumentationOptions.captureNetworkHeaders` /
+`captureResponseBodies` override them when set. On the web, header capture also
+reads `Server-Timing` trace links from responses.
+
+On Android/iOS/desktop, `HttpInstrumentationConfig.captureRequestHeaders` /
+`captureResponseHeaders` still record the `capturedHeaders` allowlist
+(`content-type`, `content-length`, `user-agent` by default) when
+`captureNetworkHeaders` is off. With `captureNetworkHeaders` on, every header
+is recorded unless you set your own `capturedHeaders`, which then limits it.
+Requests traced by a manual `OTelHttpClient` / `OTelDioInterceptor` keep that
+wrapper's own `HttpInstrumentationConfig` behaviour (no body capture).
 
 ### Platform-Specific Exporters
 

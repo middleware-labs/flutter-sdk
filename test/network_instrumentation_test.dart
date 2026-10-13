@@ -28,6 +28,9 @@ void main() {
   Future<void> initialize({
     bool enableAutomaticNetworkInstrumentation = true,
     HttpInstrumentationConfig config = const HttpInstrumentationConfig(),
+    bool captureNetworkHeaders = false,
+    bool captureResponseBodies = false,
+    Set<String> ignoreHeaders = const <String>{},
   }) {
     // reset() shuts the previous exporter down.
     exporter = InMemorySpanExporter();
@@ -43,6 +46,9 @@ void main() {
       enableAutomaticNetworkInstrumentation:
           enableAutomaticNetworkInstrumentation,
       networkInstrumentationConfig: config,
+      captureNetworkHeaders: captureNetworkHeaders,
+      captureResponseBodies: captureResponseBodies,
+      ignoreHeaders: ignoreHeaders,
     );
   }
 
@@ -66,7 +72,17 @@ void main() {
       if (request.uri.path == '/fail') {
         response.statusCode = 500;
       }
-      response.write('hello world');
+      final contentType = request.uri.queryParameters['type'];
+      if (contentType != null) {
+        response.headers
+          ..set(HttpHeaders.contentTypeHeader, contentType)
+          ..set('x-access-token', 'secret-token')
+          ..set('x-secret', 'hidden')
+          ..add('x-multi', 'a')
+          ..add('x-multi', 'b');
+      }
+      final size = int.tryParse(request.uri.queryParameters['size'] ?? '');
+      response.write(size != null ? 'x' * size : 'hello world');
       await response.close();
     });
     await initialize();
@@ -239,5 +255,197 @@ void main() {
     final span = (await httpSpans()).single;
     expect(span.spanContext.traceId, parent.spanContext.traceId);
     expect(span.parentSpanContext?.spanId, parent.spanContext.spanId);
+  });
+
+  group('header and body capture', () {
+    // Header attributes, plus the body attributes (not their sizes).
+    bool isCaptureKey(String key) =>
+        key.startsWith('http.request.header.') ||
+        key.startsWith('http.response.header.') ||
+        key == 'http.request.body' ||
+        key == 'http.response.body';
+
+    Map<String, Object> captured(sdk.Span span) => <String, Object>{
+      for (final a in span.attributes.toList())
+        if (isCaptureKey(a.key)) a.key: a.value,
+    };
+
+    Future<sdk.Span> post(
+      String type, {
+      Map<String, String> headers = const {},
+    }) async {
+      final response = await http.post(
+        url('/data?type=${Uri.encodeQueryComponent(type)}'),
+        headers: {'X-Custom': 'v1', 'X-Secret': 'nope', ...headers},
+        body: '{"password":"hunter2"}',
+      );
+      expect(response.body, 'hello world');
+      return (await httpSpans()).single;
+    }
+
+    Future<void> reinitialize({
+      HttpInstrumentationConfig config = const HttpInstrumentationConfig(),
+      bool captureNetworkHeaders = false,
+      bool captureResponseBodies = false,
+      Set<String> ignoreHeaders = const <String>{},
+    }) async {
+      await FlutterOTel.reset();
+      await initialize(
+        config: config,
+        captureNetworkHeaders: captureNetworkHeaders,
+        captureResponseBodies: captureResponseBodies,
+        ignoreHeaders: ignoreHeaders,
+      );
+    }
+
+    test('nothing is captured by default', () async {
+      final span = await post('application/json');
+      expect(captured(span), isEmpty);
+      // Sizes and status are still recorded.
+      expect(span.attributes.getInt('http.response.status_code'), 200);
+      expect(span.attributes.getInt('http.response.body.size'), 11);
+      expect(span.attributes.getInt('http.request.body.size'), 22);
+    });
+
+    test(
+      'captureNetworkHeaders records every header but ignored ones',
+      () async {
+        await reinitialize(
+          captureNetworkHeaders: true,
+          ignoreHeaders: {'X-SECRET'},
+        );
+        final span = await post('application/json; charset=utf-8');
+        final attrs = captured(span);
+
+        expect(attrs['http.request.header.x_custom'], 'v1');
+        expect(attrs['http.request.header.content_type'], isNotNull);
+        expect(attrs['http.request.header.user_agent'], isNotNull);
+        expect(
+          attrs['http.response.header.content_type'],
+          'application/json; charset=utf-8',
+        );
+        expect(attrs['http.response.header.x_multi'], 'a, b');
+        expect(attrs['http.response.header.x_access_token'], '********');
+        // ignoreHeaders, both directions.
+        expect(attrs.keys.where((k) => k.endsWith('x_secret')), isEmpty);
+        // The SDK's own trace headers aren't recorded as the app's.
+        expect(attrs.containsKey('http.request.header.traceparent'), isFalse);
+        expect(attrs.containsKey('http.request.header.b3'), isFalse);
+        // No bodies.
+        expect(attrs.containsKey('http.response.body'), isFalse);
+        expect(attrs.containsKey('http.request.body'), isFalse);
+      },
+    );
+
+    test('captureResponseBodies records the body, not headers', () async {
+      await reinitialize(captureResponseBodies: true);
+      final span = await post('application/json');
+      expect(captured(span), {'http.response.body': 'hello world'});
+    });
+
+    test('only JSON and plain-text bodies are captured', () async {
+      await reinitialize(captureResponseBodies: true);
+      const types = {
+        'application/json': true,
+        'application/problem+json; charset=utf-8': true,
+        'text/plain; charset=utf-8': true,
+        'TEXT/PLAIN': true,
+        'text/html': false,
+        'application/octet-stream': false,
+      };
+      for (final entry in types.entries) {
+        final response = await http.get(
+          url('/body?type=${Uri.encodeQueryComponent(entry.key)}'),
+        );
+        expect(response.body, 'hello world');
+      }
+      final spans = await httpSpans();
+      expect(spans, hasLength(types.length));
+      final values = types.entries.toList();
+      for (var i = 0; i < values.length; i++) {
+        expect(
+          spans[i].attributes.getString('http.response.body'),
+          values[i].value ? 'hello world' : isNull,
+          reason: values[i].key,
+        );
+      }
+    });
+
+    test(
+      'dio responses are captured without changing what dio reads',
+      () async {
+        await reinitialize(captureResponseBodies: true);
+        final response = await Dio().get<String>(
+          url('/dio?type=application/json').toString(),
+        );
+        expect(response.data, 'hello world');
+        final span = (await httpSpans()).single;
+        expect(span.attributes.getString('http.response.body'), 'hello world');
+      },
+    );
+
+    test(
+      'bodies are capped at 64 KiB; the app still reads all of it',
+      () async {
+        await reinitialize(captureResponseBodies: true);
+        const size = 100 * 1024;
+        final response = await http.get(url('/big?type=text/plain&size=$size'));
+        expect(response.bodyBytes, hasLength(size));
+        final span = (await httpSpans()).single;
+        expect(
+          span.attributes.getString('http.response.body'),
+          hasLength(64 * 1024),
+        );
+        expect(span.attributes.getInt('http.response.body.size'), size);
+      },
+    );
+
+    test('request bodies are never captured', () async {
+      await reinitialize(
+        captureNetworkHeaders: true,
+        captureResponseBodies: true,
+      );
+      final span = await post('application/json');
+      expect(span.attributes.getString('http.request.body'), isNull);
+      expect(
+        captured(
+          span,
+        ).values.whereType<String>().where((v) => v.contains('hunter2')),
+        isEmpty,
+      );
+      expect(span.attributes.getString('http.response.body'), 'hello world');
+    });
+
+    test(
+      'legacy captureRequestHeaders keeps the capturedHeaders allowlist',
+      () async {
+        await reinitialize(
+          config: const HttpInstrumentationConfig(captureRequestHeaders: true),
+        );
+        final attrs = captured(await post('application/json'));
+        expect(attrs.keys.toSet(), {
+          'http.request.header.content_type',
+          'http.request.header.user_agent',
+          'http.request.header.content_length',
+        });
+      },
+    );
+
+    test(
+      'a custom capturedHeaders allowlist limits captureNetworkHeaders',
+      () async {
+        await reinitialize(
+          config: const HttpInstrumentationConfig(
+            capturedHeaders: {'X-Custom', 'x-access-token'},
+          ),
+          captureNetworkHeaders: true,
+        );
+        final attrs = captured(await post('application/json'));
+        expect(attrs, {
+          'http.request.header.x_custom': 'v1',
+          'http.response.header.x_access_token': '********',
+        });
+      },
+    );
   });
 }

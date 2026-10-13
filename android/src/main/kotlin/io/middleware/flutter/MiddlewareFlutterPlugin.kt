@@ -173,6 +173,14 @@ class MiddlewareFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.Meth
         (config["recordingOptions"] as? Map<String, Any?>)?.let {
             builder.setRecordingOptions(recordingOptionsFrom(it))
         }
+        // Header/body capture for requests the native SDK traces (Middleware's
+        // OkHttp call factory). Off unless FlutterOTel.initialize turns it on.
+        (config["captureNetworkHeaders"] as? Boolean)?.let { builder.setCaptureNetworkHeaders(it) }
+        (config["captureResponseBodies"] as? Boolean)?.let { builder.setCaptureResponseBodies(it) }
+        (config["ignoreHeaders"] as? List<*>)
+            ?.filterIsInstance<String>()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { builder.setIgnoreHeaders(it) }
 
         // v3 session recording starts inside build() (sampler-gated).
         // Middleware.initialize is singleton-guarded, so hot restart is safe.

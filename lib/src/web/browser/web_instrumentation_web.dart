@@ -2,6 +2,7 @@
 
 // Flutter web: wires up the browser instrumentations.
 
+import '../../common/network_capture.dart';
 import '../../flutterrific_otel.dart';
 import '../web_instrumentation_options.dart';
 import '../web_utils.dart';
@@ -41,6 +42,7 @@ final List<void Function()> _active = [];
 void enable(
   WebInstrumentationOptions options, {
   required List<Pattern> ignoreUrls,
+  required NetworkCapture networkCapture,
 }) {
   disable();
   if (!options.enabled) return;
@@ -66,6 +68,7 @@ void enable(
   final network = NetworkInstrumentation(
     options: options,
     ignoreUrls: ignoreUrls,
+    capture: networkCapture,
   );
   start(options.network, network.enable, network.disable);
 
