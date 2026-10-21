@@ -175,8 +175,18 @@ class OTelNavigatorObserver extends NavigatorObserver {
     // recorder's replay timeline. Runs after the currentRouteData update so
     // it always reflects the visible route. The native call is a no-op on
     // web / when the plugin is unavailable.
+    //
+    // Dialogs, bottom sheets and menus (PopupRoute) sit over a screen rather
+    // than replacing it, and are almost always unnamed, so they don't change
+    // the screen: the one beneath stays current and the pathway doesn't get a
+    // Home -> unknown -> Home detour per dialog. An unnamed full-screen route
+    // still reports the fallback name: it is a real screen change, and
+    // dropping it would draw a direct edge between its neighbours.
+    final visibleRoute = updateCurrentTo ?? (useDefault ? newRoute : null);
     final screenName = currentRouteData?.routeName;
-    if (screenName != null && screenName.isNotEmpty) {
+    if (visibleRoute is! PopupRoute &&
+        screenName != null &&
+        screenName.isNotEmpty) {
       MiddlewareNativeBridge.setScreenName(screenName);
       FlutterOTel.screenshotManager?.setScreenName(screenName);
       _recordScreenView(screenName);

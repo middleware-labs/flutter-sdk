@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.1
+
+- Dialogs, bottom sheets and popup menus (any `PopupRoute`) no longer count as
+  screen changes. They used to emit a `screen_view` named `unknown` and move
+  `screen.name` to `unknown` for taps and the session replay, so the RUM
+  pathway showed a `Home → unknown → Home` detour for every dialog. The screen
+  underneath now stays current. Unnamed full-screen routes still report
+  `unknown`: give them a `RouteSettings(name:)` to see them by name.
+
 ## 2.2.0
 
 - Requires the native SDKs with the same capture options: Android

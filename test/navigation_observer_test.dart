@@ -526,5 +526,123 @@ void main() {
       },
       timeout: const Timeout(Duration(seconds: 10)),
     );
+
+    testWidgets(
+      'Should not treat dialogs or bottom sheets as screens',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            initialRoute: '/',
+            navigatorObservers: [navigatorObserver],
+            routes: {
+              '/':
+                  (context) => Scaffold(
+                    body: Column(
+                      children: [
+                        ElevatedButton(
+                          key: const Key('open_dialog'),
+                          onPressed:
+                              () => showDialog<void>(
+                                context: context,
+                                builder:
+                                    (context) => TextButton(
+                                      key: const Key('close_dialog'),
+                                      onPressed: () => Navigator.pop(context),
+                                      child: const Text('Close'),
+                                    ),
+                              ),
+                          child: const Text('Dialog'),
+                        ),
+                        ElevatedButton(
+                          key: const Key('open_sheet'),
+                          onPressed:
+                              () => showModalBottomSheet<void>(
+                                context: context,
+                                builder:
+                                    (context) => TextButton(
+                                      key: const Key('close_sheet'),
+                                      onPressed: () => Navigator.pop(context),
+                                      child: const Text('Close'),
+                                    ),
+                              ),
+                          child: const Text('Sheet'),
+                        ),
+                        ElevatedButton(
+                          key: const Key('go_to_details'),
+                          onPressed:
+                              () => Navigator.pushNamed(context, '/details'),
+                          child: const Text('Details'),
+                        ),
+                      ],
+                    ),
+                  ),
+              '/details': (context) => const Scaffold(body: Text('Details')),
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('open_dialog')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('close_dialog')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('open_sheet')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('close_sheet')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('go_to_details')));
+        await tester.pumpAndSettle();
+
+        final views = screenViews();
+        expect(
+          views.map((s) => s.attributes.getString('screen.name')).toList(),
+          ['/', '/details'],
+        );
+        expect(views[1].attributes.getString('last.screen.name'), '/');
+      },
+      timeout: const Timeout(Duration(seconds: 10)),
+    );
+
+    testWidgets(
+      'Should still report an unnamed full-screen route',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            initialRoute: '/',
+            navigatorObservers: [navigatorObserver],
+            routes: {
+              '/':
+                  (context) => Scaffold(
+                    body: ElevatedButton(
+                      key: const Key('push_unnamed'),
+                      onPressed:
+                          () => Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder:
+                                  (context) =>
+                                      const Scaffold(body: Text('Unnamed')),
+                            ),
+                          ),
+                      child: const Text('Unnamed'),
+                    ),
+                  ),
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('push_unnamed')));
+        await tester.pumpAndSettle();
+
+        expect(
+          screenViews()
+              .map((s) => s.attributes.getString('screen.name'))
+              .toList(),
+          ['/', 'unknown'],
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 10)),
+    );
   });
 }
