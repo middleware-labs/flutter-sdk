@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.2
+
+- Bumped Android `io.github.middleware-labs:android-sdk` to 3.2.2 (was
+  3.2.0). Every Android launch used to produce a second session next to the
+  real one, holding only a native `AppStart` and a `Paused` when the app was
+  backgrounded, with no replay. 3.2.2 no longer installs otel-android's
+  activity lifecycle instrumentation when the plugin disables lifecycle
+  monitoring, so that session is gone.
+
 ## 2.2.1
 
 - Dialogs, bottom sheets and popup menus (any `PopupRoute`) no longer count as
