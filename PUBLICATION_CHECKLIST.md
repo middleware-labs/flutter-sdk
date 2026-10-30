@@ -49,7 +49,8 @@ This document outlines the steps to follow when publishing a new version of the 
 ### 1. Prepare Release
 - [ ] Update version in `pubspec.yaml`
 - [ ] Update version in example app's `pubspec.yaml`
-- [ ] Update CHANGELOG.md with release date and changes
+- [ ] Cut the CHANGELOG.md section: `python3 scripts/changelog.py release <version>`
+      (moves the `[Unreleased]` entries under a dated `[<version>]` heading)
 - [ ] Update any version references in documentation
 - [ ] Create a git tag for the version (e.g., `git tag v0.3.0`)
 - [ ] Push the tag to the repository (`git push origin v0.3.0`)
