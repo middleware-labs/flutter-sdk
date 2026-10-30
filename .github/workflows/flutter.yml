@@ -24,6 +24,8 @@ jobs:
         run: dart format --output=none --set-exit-if-changed .
       - name: Analyze project source
         run: flutter analyze --fatal-infos
+      - name: Verify CHANGELOG.md has a section for the pubspec version
+        run: python3 scripts/changelog.py check "$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml)"
 
   test:
     runs-on: ubuntu-latest

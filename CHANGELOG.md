@@ -1,6 +1,22 @@
 # Changelog
 
-## 2.2.2
+All notable changes to the Middleware Flutter SDK (`middleware_flutter_opentelemetry`) are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+<!--
+Maintaining this file:
+- Every PR that changes SDK behavior adds a bullet under [Unreleased], in the
+  right category (Added, Changed, Deprecated, Removed, Fixed, Security).
+  Write it for app developers: what changes for them, not how it was done.
+- To release: python3 scripts/changelog.py release <version>
+  (moves [Unreleased] into a dated section; CI fails while the pubspec.yaml
+  version has no section, and pub.dev shows this file as the release notes).
+-->
+
+## [Unreleased]
+
+## [2.2.2] - 2026-10-28
 
 - Bumped Android `io.github.middleware-labs:android-sdk` to 3.2.2 (was
   3.2.0). Every Android launch used to produce a second session next to the
@@ -9,7 +25,7 @@
   activity lifecycle instrumentation when the plugin disables lifecycle
   monitoring, so that session is gone.
 
-## 2.2.1
+## [2.2.1] - 2026-10-21
 
 - Dialogs, bottom sheets and popup menus (any `PopupRoute`) no longer count as
   screen changes. They used to emit a `screen_view` named `unknown` and move
@@ -18,7 +34,7 @@
   underneath now stays current. Unnamed full-screen routes still report
   `unknown`: give them a `RouteSettings(name:)` to see them by name.
 
-## 2.2.0
+## [2.2.0] - 2026-10-13
 
 - Requires the native SDKs with the same capture options: Android
   `io.github.middleware-labs:android-sdk` 3.2.0 (was 3.1.8) and iOS
@@ -53,7 +69,10 @@
     plugins; Android requests made through Middleware's OkHttp call factory)
     follow them too.
 
-## 2.1.1 – 2.1.3
+## [2.1.3] - 2026-10-05
+
+Covers 2.1.1 (2026-10-01), 2.1.2 (2026-10-02) and 2.1.3, published in quick
+succession.
 
 - HTTP requests are traced automatically on Android, iOS and desktop. Before
   this, only clients wrapped with `instrument()` / `addOTelInstrumentation()`
@@ -132,7 +151,7 @@
 - Fixed `UITracer.createSpan` throwing a cast error.
 - `UITracer.recordUserInteraction` now returns the recorded span.
 
-## 2.1.0
+## [2.1.0] - 2026-09-24
 
 - Fixed web session replay: web sessions had no playable recording. The Dart
   recorder (web and desktop) still uploaded JPEG tarballs to `/v1/rum`, which
@@ -146,7 +165,7 @@
   `staleScreenshotMaxAge` and `uploadStaleFilesOnStart`; they have no effect.
 - Removed the unused `archive` and `path_provider` dependencies.
 
-## 2.0.2
+## [2.0.2] - 2026-09-23
 
 - Fixed Android session replay: Android sessions recorded nothing. Two causes:
   - Flutter draws its UI into a `SurfaceView`, which the native recorder
@@ -160,12 +179,12 @@
 - No more extra one-span "Anonymous" session per app launch on Android (the
   native SDK's `record init` sampling probe, fixed in android-sdk 3.1.6).
 
-## 2.0.1
+## [2.0.1] - 2026-09-23
 
 - Bumped the native SDKs to `io.github.middleware-labs:android-sdk:3.1.5` and
   `MiddlewareRum` >= 2.2.4.
 
-## 2.0.0
+## [2.0.0] - 2026-09-23
 
 - **Breaking:** removed the `disableSessionRecordingV3` option from
   `FlutterOTel.initialize`. On Android/iOS the native recorder is now the only
@@ -173,7 +192,7 @@
 - Removed the `recordingV3` resource attribute. The backend no longer reads
   it; `recording` still signals that a session has a replay.
 
-## 1.2.0
+## [1.2.0] - 2026-07-31
 
 - `FlutterOTel.startSessionRecording()` / `stopSessionRecording()` now work on
   the **native v3** path (Android/iOS), where they were previously no-ops — they
@@ -194,7 +213,9 @@
   `io.github.middleware-labs:android-sdk:3.1.0`, which add the underlying
   start/stop recording APIs.
 
-## 1.1.1
+## [1.1.1] - 2026-07-28
+
+Includes 1.1.0, published the same day.
 
 - Converted the package from a pure-Dart package to a Flutter plugin with
   native Android (`io.github.middleware-labs:android-sdk`) and iOS
@@ -222,6 +243,6 @@
   reported as `Android`/`iOS`, plus native-provided app version, OS version,
   and device model.
 
-## 1.0.16
+## [1.0.16] - 2026-06-23
 
 - Previous pub.dev release (pure-Dart package).
