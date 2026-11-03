@@ -1,11 +1,11 @@
 PODS:
   - BitByteData (2.0.4)
-  - DeviceKit (5.9.0)
+  - DeviceKit (5.10.0)
   - Flutter (1.0.0)
   - middleware_flutter_opentelemetry (2.1.0):
     - Flutter
-    - MiddlewareRum (>= 2.3.0, ~> 2.3)
-  - MiddlewareRum (2.3.0):
+    - MiddlewareRum (>= 2.3.1, ~> 2.3)
+  - MiddlewareRum (2.3.1):
     - DeviceKit (~> 5.4)
     - PLCrashReporter (~> 1.11)
     - Reachability (~> 3.7)
@@ -61,10 +61,11 @@ DEPENDENCIES:
   - middleware_flutter_opentelemetry (from `.symlinks/plugins/middleware_flutter_opentelemetry/ios`)
 
 SPEC REPOS:
+  https://github.com/middleware-labs/cocoapods-specs.git:
+    - MiddlewareRum
   trunk:
     - BitByteData
     - DeviceKit
-    - MiddlewareRum
     - PLCrashReporter
     - Reachability
     - SWCompression
@@ -78,15 +79,15 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   BitByteData: 2422ed269fcddc44976d97f171a183d25ef535ce
-  DeviceKit: 90a1ff9c523d856d52a85d3b6088cad30f6234ff
+  DeviceKit: 37fc92e0e41f6b2586b510c4798e89d7b44d7bc4
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  middleware_flutter_opentelemetry: 8b98bc210510ef5d3a4a2ed7ce353114cc4b9024
-  MiddlewareRum: eb263cbb3da6dce5cda225f7d8cdbc72c8e09bf4
+  middleware_flutter_opentelemetry: 3b4a63483a2ea4cbc2e5d05fd9f6bf4fc2f18ab8
+  MiddlewareRum: 90091571a8a411f82016ac5f98a228f9f9949fa5
   PLCrashReporter: db59ef96fa3d25f3650040d02ec2798cffee75f2
   Reachability: 8bf74b755b2993968c344b465c13e602db2b1044
   SWCompression: 9379873ad5e9f25b31db88c441649b59a4c2bab7
   SwiftProtobuf: b109bd17979d7993a84da14b1e1fdd8b0ded934a
 
-PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+PODFILE CHECKSUM: 2dd8a1b3979d16249fda199a29b1e334a22fd3b1
 
 COCOAPODS: 1.17.0
