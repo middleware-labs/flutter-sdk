@@ -53,6 +53,17 @@ dependencies:
   middleware_flutter_opentelemetry: ^1.0.0
 ```
 
+#### iOS
+
+Add these sources to the top of `ios/Podfile`:
+
+```ruby
+source 'https://github.com/middleware-labs/cocoapods-specs.git'
+source 'https://cdn.cocoapods.org/'
+```
+
+CocoaPods trunk stops accepting new pods on December 2, 2026, so new `MiddlewareRum` versions are published to the Middleware repo. Without that source, your app stays on the last version published to trunk.
+
 ### 2. Initialize
 
 ```dart
