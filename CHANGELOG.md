@@ -16,6 +16,21 @@ Maintaining this file:
 
 ## [Unreleased]
 
+## [2.2.3] - 2026-11-03
+
+- iOS now requires `MiddlewareRum` 2.3.1 or a newer 2.x version. Add the Middleware
+  specs repo as a source in `ios/Podfile`, as described in the README, then run
+  `pod update MiddlewareRum` in `ios/`. Plain `pod install` fails against a
+  `Podfile.lock` that pins an older version, with an error that wrongly mentions the
+  deployment target. Until 2.3.1 is on CocoaPods trunk, it can't be found without
+  that source.
+- iOS: a hot restart no longer doubles native `slowRenders` and `frozenRenders`
+  spans, or starts native instrumentation again. Native settings now apply once per
+  process, so relaunch the app to change them.
+- iOS: a native frame now has to miss a vsync to count as slow, and native spans
+  report the screen that was showing when the frame was slow. Slow-render totals may
+  drop after upgrading.
+
 ## [2.2.2] - 2026-10-28
 
 - Bumped Android `io.github.middleware-labs:android-sdk` to 3.2.2 (was
